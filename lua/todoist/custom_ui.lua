@@ -616,6 +616,108 @@ local function setup_autocmds(state_obj)
   })
 end
 
+-- Floating window to create a new task (same UI as edit, but blank)
+local function open_create_window(state_obj)
+  local total_w = vim.o.columns
+  local total_h = vim.o.lines
+  local width   = math.floor(total_w * 0.60)
+  local height  = math.floor(total_h * 0.55)
+  local row     = math.floor((total_h - height) / 2)
+  local col     = math.floor((total_w - width) / 2)
+
+  vim.api.nvim_set_hl(0, "TodoistEditTitle", { bold = true })
+  vim.api.nvim_set_hl(0, "TodoistEditSep",   { fg = "#44475a" })
+  vim.api.nvim_set_hl(0, "TodoistEditLabel", { fg = "#6272a4", italic = true })
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  pcall(function()
+    vim.api.nvim_buf_set_option(buf, 'buftype', 'nofile')
+    vim.api.nvim_buf_set_option(buf, 'swapfile', false)
+    vim.api.nvim_buf_set_option(buf, 'bufhidden', 'wipe')
+    vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
+  end)
+
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "" })
+
+  local ns = vim.api.nvim_create_namespace("todoist_create_ui")
+
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    virt_lines       = { { { "  Title", "TodoistEditLabel" } } },
+    virt_lines_above = true,
+  })
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    line_hl_group = "TodoistEditTitle",
+  })
+  local sep_text = string.rep("─", width - 2)
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    virt_lines = {
+      { { sep_text,        "TodoistEditSep"   } },
+      { { "  Description", "TodoistEditLabel" } },
+    },
+    virt_lines_above = false,
+  })
+
+  local win_opts = {
+    relative  = "editor",
+    width     = width, height = height, row = row, col = col,
+    style     = "minimal", border = "rounded",
+    title     = " New Task ", title_pos = "center",
+  }
+  pcall(function()
+    win_opts.footer     = "  <leader>tw  save    <leader>tq/<Esc>  close  "
+    win_opts.footer_pos = "center"
+  end)
+
+  local win = vim.api.nvim_open_win(buf, true, win_opts)
+  pcall(vim.api.nvim_win_set_option, win, 'wrap', true)
+  pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
+  pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
+
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  vim.cmd("startinsert!")
+
+  local function save_and_close()
+    local lines       = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local new_content = vim.trim(lines[1] or "")
+    if new_content == "" then
+      vim.notify("Task title cannot be empty", vim.log.levels.WARN)
+      return
+    end
+
+    local desc_parts = {}
+    for i = 2, #lines do table.insert(desc_parts, lines[i]) end
+    while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
+      table.remove(desc_parts)
+    end
+    local new_description = table.concat(desc_parts, "\n")
+
+    pcall(vim.api.nvim_win_close, win, true)
+
+    local auth_mod = require("todoist.auth")
+    local token    = auth_mod.load_token()
+    if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
+
+    local payload = { content = new_content, due_string = "today" }
+    if new_description ~= "" then payload.description = new_description end
+
+    local cfg = require("todoist.config").get()
+    if cfg.default_project then payload.project_id = cfg.default_project end
+
+    local client_mod = require("todoist.client")
+    client_mod.add_task(token, payload, function(err, task)
+      if err then vim.notify("Failed to create task: " .. err, vim.log.levels.ERROR); return end
+      vim.notify(string.format("Created: %s", task and task.content or new_content))
+      refresh_with_loader(state_obj)
+    end)
+  end
+
+  vim.keymap.set('n', '<leader>tw', save_and_close,
+    { buffer = buf, noremap = true, silent = true })
+  local function close_window() pcall(vim.api.nvim_win_close, win, true) end
+  vim.keymap.set('n', '<leader>tq', close_window, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<Esc>',      close_window, { buffer = buf, noremap = true, silent = true })
+end
+
 -- Floating editor for task title + description
 local function open_edit_window(task, state_obj)
   local total_w = vim.o.columns
@@ -795,6 +897,7 @@ function setup_actions(state_obj)
   vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, { buffer = buf, noremap = true, silent = true })
   vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "delete")   end, { buffer = buf, noremap = true, silent = true })
   vim.keymap.set('n', '<leader>tr', function() refresh_with_loader(state_obj)        end, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<leader>tn', function() open_create_window(state_obj)         end, { buffer = buf, noremap = true, silent = true })
   vim.keymap.set('n', '/',          function() enter_search_mode(state_obj)          end, { buffer = buf, noremap = true, silent = true })
 end
 

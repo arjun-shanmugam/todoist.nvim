@@ -27,7 +27,9 @@ local function refresh_tasks(opts)
     return
   end
 
-  -- Start loader for FZF
+  local cfg = config.get()
+  local use_custom_ui = cfg.today_view_ui == "custom"
+
   local loader = require("todoist.loader")
   local loader_id = loader.create_loader({
     ui_type = "fzf",
@@ -36,10 +38,9 @@ local function refresh_tasks(opts)
   loader.start(loader_id)
 
   client.fetch_tasks(token, {
-    project_id = opts.project_id or config.get().default_project,
+    project_id = opts.project_id or cfg.default_project,
     filter = opts.filter,
   }, function(err, tasks)
-    -- Stop loader
     loader.stop(loader_id)
 
     if err then
@@ -47,72 +48,34 @@ local function refresh_tasks(opts)
       return
     end
 
-    local filtered_tasks = tasks or {}
-
-    if opts.priority_filter or opts.date_filter then
-      fzf.show_tasks_filtered(filtered_tasks, {
-        priority_filter = opts.priority_filter,
-        date_filter = opts.date_filter,
-        on_refresh = function()
-          refresh_tasks(opts)
-        end,
-        on_complete = function(task)
-          M.complete_task(task.id, function(close_err)
-            if close_err then
-              notify(close_err, vim.log.levels.ERROR)
-              return
-            end
-            notify(string.format("Completed task %s", task.content))
-            refresh_tasks(opts)
-          end)
-        end,
-      })
-    else
-      fzf.show_tasks(filtered_tasks, {
-        on_refresh = function()
-          refresh_tasks(opts)
-        end,
-        on_complete = function(task)
-          M.complete_task(task.id, function(close_err)
-            if close_err then
-              notify(close_err, vim.log.levels.ERROR)
-              return
-            end
-            notify(string.format("Completed task %s", task.content))
-            refresh_tasks(opts)
-          end)
-        end,
-      })
-    end
-  end)
-end
-
-local function refresh_today_view()
-  local token = get_token()
-  if not token then
-    return
-  end
-
-  local cfg = config.get()
-  local use_custom_ui = cfg.today_view_ui == "custom"
-
-  -- Start loader for both UI modes
-  local loader = require("todoist.loader")
-  local loader_id = loader.create_loader({
-    ui_type = "fzf",  -- Use notification style for both (UI doesn't exist yet)
-    message = "Loading today's tasks...",
-  })
-  loader.start(loader_id)
-
-  local function open_today(tasks, projects)
-    -- Stop loader before opening UI
-    loader.stop(loader_id)
+    local task_list = tasks or {}
 
     if use_custom_ui then
-      local custom_ui = require("todoist.custom_ui")
-      custom_ui.show_today(tasks or {}, {
-        projects = projects,
-        on_refresh = refresh_today_view,
+      client.fetch_projects(token, function(project_err, projects)
+        if project_err then
+          notify(project_err, vim.log.levels.WARN)
+        end
+        local custom_ui = require("todoist.custom_ui")
+        custom_ui.show_today(task_list, {
+          projects = projects or {},
+          on_refresh = function() refresh_tasks(opts) end,
+          on_complete = function(task)
+            M.complete_task(task.id, function(close_err)
+              if close_err then
+                notify(close_err, vim.log.levels.ERROR)
+                return
+              end
+              notify(string.format("Completed task %s", task.content))
+              refresh_tasks(opts)
+            end)
+          end,
+        })
+      end)
+    elseif opts.priority_filter or opts.date_filter then
+      fzf.show_tasks_filtered(task_list, {
+        priority_filter = opts.priority_filter,
+        date_filter = opts.date_filter,
+        on_refresh = function() refresh_tasks(opts) end,
         on_complete = function(task)
           M.complete_task(task.id, function(close_err)
             if close_err then
@@ -120,14 +83,13 @@ local function refresh_today_view()
               return
             end
             notify(string.format("Completed task %s", task.content))
-            refresh_today_view()
+            refresh_tasks(opts)
           end)
         end,
       })
     else
-      fzf.show_today(tasks or {}, {
-        projects = projects,
-        on_refresh = refresh_today_view,
+      fzf.show_tasks(task_list, {
+        on_refresh = function() refresh_tasks(opts) end,
         on_complete = function(task)
           M.complete_task(task.id, function(close_err)
             if close_err then
@@ -135,34 +97,17 @@ local function refresh_today_view()
               return
             end
             notify(string.format("Completed task %s", task.content))
-            refresh_today_view()
+            refresh_tasks(opts)
           end)
         end,
       })
     end
-  end
-
-  client.fetch_tasks(token, { filter = "today" }, function(err, tasks)
-    if err then
-      -- Stop loader on error
-      loader.stop(loader_id)
-      notify(err, vim.log.levels.ERROR)
-      return
-    end
-
-    client.fetch_projects(token, function(project_err, projects)
-      if project_err then
-        notify(project_err, vim.log.levels.WARN)
-      end
-      open_today(tasks, projects or {})
-    end)
   end)
 end
 
 function M.setup(opts)
   config.setup(opts)
 
-  -- Setup keymaps if enabled
   local keymaps = require("todoist.keymaps")
   local cfg = config.get()
   keymaps.setup(cfg.keymaps)
@@ -200,44 +145,10 @@ function M.complete_task(task_id, cb)
   client.close_task(token, task_id, function(err)
     if err then
       notify(err, vim.log.levels.ERROR)
-      if cb then
-        cb(err)
-      end
+      if cb then cb(err) end
       return
     end
-    if cb then
-      cb()
-    end
-  end)
-end
-
-function M.add_task()
-  local token = get_token()
-  if not token then
-    return
-  end
-  vim.ui.input({ prompt = "Task content: " }, function(content)
-    if not content or content == "" then
-      notify("Task content is required", vim.log.levels.WARN)
-      return
-    end
-    vim.ui.input({ prompt = "Due (optional - 'tomorrow', '2024-12-31'): " }, function(due)
-      local payload = {
-        content = content,
-        project_id = config.get().default_project,
-        priority = config.get().default_priority,
-      }
-      if due and due ~= "" then
-        payload.due_string = due
-      end
-      client.add_task(token, payload, function(err, task)
-        if err then
-          notify(err, vim.log.levels.ERROR)
-          return
-        end
-        notify(string.format("Created task %s", task and task.content or content))
-      end)
-    end)
+    if cb then cb() end
   end)
 end
 
@@ -255,14 +166,6 @@ local function setup_commands()
       project_id = opts.args ~= "" and opts.args or config.get().default_project,
     })
   end, { nargs = "?" })
-
-  vim.api.nvim_create_user_command("TodoistToday", function()
-    refresh_today_view()
-  end, {})
-
-  vim.api.nvim_create_user_command("TodoistAdd", function()
-    M.add_task()
-  end, {})
 
   vim.api.nvim_create_user_command("TodoistComplete", function(opts)
     local id = opts.args

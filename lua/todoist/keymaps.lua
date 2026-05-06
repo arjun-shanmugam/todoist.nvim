@@ -4,9 +4,7 @@ local defaults = {
   enable = true,
   mappings = {
     open_tasks = "<leader>tt",
-    open_today = "<leader>ty",
-    add_task = "<leader>ta",
-    login = "<leader>tl",
+    login  = "<leader>tl",
     logout = "<leader>tL",
   }
 }
@@ -21,7 +19,6 @@ function M.setup(opts)
 
   local mappings = config.mappings
 
-  -- Open tasks window
   if mappings.open_tasks then
     vim.keymap.set("n", mappings.open_tasks, "<cmd>TodoistTasks<cr>", {
       desc = "Open Todoist tasks",
@@ -29,23 +26,6 @@ function M.setup(opts)
     })
   end
 
-  -- Open today view
-  if mappings.open_today then
-    vim.keymap.set("n", mappings.open_today, "<cmd>TodoistToday<cr>", {
-      desc = "Open Todoist today view",
-      silent = true,
-    })
-  end
-
-  -- Add new task
-  if mappings.add_task then
-    vim.keymap.set("n", mappings.add_task, "<cmd>TodoistAdd<cr>", {
-      desc = "Add Todoist task",
-      silent = true,
-    })
-  end
-
-  -- Login (optional)
   if mappings.login then
     vim.keymap.set("n", mappings.login, "<cmd>TodoistLogin<cr>", {
       desc = "Todoist login",
@@ -53,7 +33,6 @@ function M.setup(opts)
     })
   end
 
-  -- Logout (optional)
   if mappings.logout then
     vim.keymap.set("n", mappings.logout, "<cmd>TodoistLogout<cr>", {
       desc = "Todoist logout",
