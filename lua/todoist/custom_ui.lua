@@ -892,6 +892,8 @@ local function open_edit_window(task, state_obj)
     if new_description ~= (task.description or "") then updates.description = new_description end
     if new_due ~= original_due then
       updates.due_string = new_due ~= "" and new_due or vim.NIL
+      -- Todoist v1 requires content to be present when modifying due_string
+      if not updates.content then updates.content = new_content end
     end
 
     local new_project_id = nil
