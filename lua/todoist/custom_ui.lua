@@ -765,6 +765,11 @@ local function open_create_window(state_obj)
     end
     local new_description = table.concat(desc_parts, "\n")
     pcall(vim.api.nvim_win_close, win, true)
+    vim.schedule(function()
+      if vim.api.nvim_win_is_valid(state_obj.win) then
+        vim.api.nvim_set_current_win(state_obj.win)
+      end
+    end)
 
     local token = require("todoist.auth").load_token()
     if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
@@ -795,7 +800,14 @@ local function open_create_window(state_obj)
   local o = { buffer = buf, noremap = true, silent = true }
   vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save new task"  }))
   vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project" }))
-  local function close() pcall(vim.api.nvim_win_close, win, true) end
+  local function close()
+    pcall(vim.api.nvim_win_close, win, true)
+    vim.schedule(function()
+      if vim.api.nvim_win_is_valid(state_obj.win) then
+        vim.api.nvim_set_current_win(state_obj.win)
+      end
+    end)
+  end
   vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
   vim.keymap.set('n', '<Esc>',      close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
 end
@@ -916,6 +928,11 @@ local function open_edit_window(task, state_obj)
     end
     local new_description = table.concat(desc_parts, "\n")
     pcall(vim.api.nvim_win_close, win, true)
+    vim.schedule(function()
+      if vim.api.nvim_win_is_valid(state_obj.win) then
+        vim.api.nvim_set_current_win(state_obj.win)
+      end
+    end)
 
     local updates = {}
     if new_content ~= (task.content or "") then updates.content = new_content end
@@ -932,7 +949,14 @@ local function open_edit_window(task, state_obj)
       new_project_id = selected_project.id
     end
 
-    if not next(updates) and not new_project_id then return end
+    if not next(updates) and not new_project_id then
+      vim.schedule(function()
+        if vim.api.nvim_win_is_valid(state_obj.win) then
+          vim.api.nvim_set_current_win(state_obj.win)
+        end
+      end)
+      return
+    end
     update_task_field(task.id, updates, new_project_id, state_obj)
   end
 
@@ -947,10 +971,21 @@ local function open_edit_window(task, state_obj)
     end)
   end
 
+  local function refocus()
+    vim.schedule(function()
+      if vim.api.nvim_win_is_valid(state_obj.win) then
+        vim.api.nvim_set_current_win(state_obj.win)
+      end
+    end)
+  end
+
   local o = { buffer = buf, noremap = true, silent = true }
   vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save task"      }))
   vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project" }))
-  local function close() pcall(vim.api.nvim_win_close, win, true) end
+  local function close()
+    pcall(vim.api.nvim_win_close, win, true)
+    refocus()
+  end
   vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
   vim.keymap.set('n', '<Esc>',      close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
 end
