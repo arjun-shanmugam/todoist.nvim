@@ -84,6 +84,7 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "TodoistDueTime",    hl_cfg.due_time or { fg = "#ff79c6" })
   vim.api.nvim_set_hl(0, "TodoistDescription", { fg = "#6272a4", italic = true })
   vim.api.nvim_set_hl(0, "TodoistSeparator",  { fg = "#44475a" })
+  vim.api.nvim_set_hl(0, "TodoistCompleted",  { fg = "#44475a", strikethrough = true })
 end
 
 -- Write plain-text mirror of the buffer lines for ClaudeCode send
@@ -98,7 +99,8 @@ end
 
 -- Format a single task line; depth controls indentation for child tasks
 local function format_task_entry(task, depth)
-  local indent = string.rep("  ", (depth or 0) + 1)
+  local indent   = string.rep("  ", (depth or 0) + 1)
+  local checkbox = task.checked and "[x] " or "[ ] "
   local due_suffix = ""
   if task.due and type(task.due) == "table" then
     local label = task.due.string or task.due.date
@@ -106,7 +108,7 @@ local function format_task_entry(task, depth)
       due_suffix = " @" .. label
     end
   end
-  return indent .. (task.content or "(no content)") .. due_suffix
+  return indent .. checkbox .. (task.content or "(no content)") .. due_suffix
 end
 
 -- Format project section header
@@ -347,20 +349,19 @@ local function apply_highlights(buf, lines, line_map)
         pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl_name, line_idx, 0, -1)
 
       elseif line_info.type == "task" then
-        local task     = line_info.task
-        local line     = lines[line_num]
+        local task = line_info.task
+        local line = lines[line_num]
         if not line then goto continue end
 
-        local priority = task.priority or 1
-        local hl_group = "TodoistP" .. priority
-
-        -- Whole line gets the priority color
-        pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl_group, line_idx, 0, -1)
-
-        -- Due time overrides with its own color
-        local ts, te = line:find("@[^%s]+")
-        if ts then
-          pcall(vim.api.nvim_buf_add_highlight, buf, ns, "TodoistDueTime", line_idx, ts - 1, te)
+        if task.checked then
+          pcall(vim.api.nvim_buf_add_highlight, buf, ns, "TodoistCompleted", line_idx, 0, -1)
+        else
+          local hl_group = "TodoistP" .. (task.priority or 1)
+          pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl_group, line_idx, 0, -1)
+          local ts, te = line:find("@[^%s]+")
+          if ts then
+            pcall(vim.api.nvim_buf_add_highlight, buf, ns, "TodoistDueTime", line_idx, ts - 1, te)
+          end
         end
 
       elseif line_info.type == "description" then
@@ -509,7 +510,8 @@ local function refresh_with_loader(state_obj)
   end
 
   local client = require("todoist.client")
-  client.fetch_tasks(token, { filter = "today" }, function(err, tasks)
+  local filter = state_obj.show_completed and "today | (completed & today)" or "today"
+  client.fetch_tasks(token, { filter = filter }, function(err, tasks)
     if err then
       loader.stop(state_obj.loader_id)
       state_obj.is_loading = false
@@ -999,12 +1001,18 @@ function setup_actions(state_obj)
   local buf = state_obj.buf
   local o   = { buffer = buf, noremap = true, silent = true }
 
-  vim.keymap.set('n', '<CR>',        function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: complete task"  }))
-  vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, vim.tbl_extend("force", o, { desc = "Todoist: edit task"      }))
-  vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "delete")   end, vim.tbl_extend("force", o, { desc = "Todoist: delete task"    }))
-  vim.keymap.set('n', '<leader>tr', function() refresh_with_loader(state_obj)        end, vim.tbl_extend("force", o, { desc = "Todoist: refresh"        }))
-  vim.keymap.set('n', '<leader>tn', function() open_create_window(state_obj)         end, vim.tbl_extend("force", o, { desc = "Todoist: new task"       }))
-  vim.keymap.set('n', '/',          function() enter_search_mode(state_obj)          end, vim.tbl_extend("force", o, { desc = "Todoist: search tasks"   }))
+  vim.keymap.set('n', '<CR>',        function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: complete task"         }))
+  vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, vim.tbl_extend("force", o, { desc = "Todoist: edit task"              }))
+  vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: complete task"         }))
+  vim.keymap.set('n', '<leader>td', function() handle_action(state_obj, "delete")   end, vim.tbl_extend("force", o, { desc = "Todoist: delete task"            }))
+  vim.keymap.set('n', '<leader>tr', function() refresh_with_loader(state_obj)        end, vim.tbl_extend("force", o, { desc = "Todoist: refresh"                }))
+  vim.keymap.set('n', '<leader>tn', function() open_create_window(state_obj)         end, vim.tbl_extend("force", o, { desc = "Todoist: new task"               }))
+  vim.keymap.set('n', '<leader>ts', function()
+    state_obj.show_completed = not state_obj.show_completed
+    refresh_with_loader(state_obj)
+    vim.notify(state_obj.show_completed and "Showing completed tasks" or "Hiding completed tasks")
+  end, vim.tbl_extend("force", o, { desc = "Todoist: toggle completed tasks" }))
+  vim.keymap.set('n', '/',          function() enter_search_mode(state_obj)          end, vim.tbl_extend("force", o, { desc = "Todoist: search tasks"           }))
 end
 
 -- Main entry point
@@ -1039,6 +1047,7 @@ function M.show_today(tasks, opts)
     project_lookup = project_lookup,
     search_mode    = false,
     search_query   = "",
+    show_completed = false,
     is_loading     = false,
     loader_id      = nil,
     on_refresh     = opts.on_refresh,
