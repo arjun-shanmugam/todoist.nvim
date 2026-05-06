@@ -643,9 +643,7 @@ local function open_create_window(state_obj)
   vim.api.nvim_set_hl(0, "TodoistEditTitle",       { bold = true })
   vim.api.nvim_set_hl(0, "TodoistEditSep",         { fg = "#44475a" })
   vim.api.nvim_set_hl(0, "TodoistEditLabel",       { fg = "#6272a4", italic = true })
-  vim.api.nvim_set_hl(0, "TodoistEditProjectName", { fg = "#f8f8f2" })
-
-  local cfg = require("todoist.config").get()
+  vim.api.nvim_set_hl(0, "TodoistEditProjectName", {})
   local selected_project = { id = nil, name = "Inbox" }
   if cfg.default_project and state_obj.project_lookup then
     local p = state_obj.project_lookup[tostring(cfg.default_project)]
@@ -773,9 +771,7 @@ local function open_edit_window(task, state_obj)
   vim.api.nvim_set_hl(0, "TodoistEditTitle",       { bold = true })
   vim.api.nvim_set_hl(0, "TodoistEditSep",         { fg = "#44475a" })
   vim.api.nvim_set_hl(0, "TodoistEditLabel",       { fg = "#6272a4", italic = true })
-  vim.api.nvim_set_hl(0, "TodoistEditProjectName", { fg = "#f8f8f2" })
-
-  local selected_project = { id = task.project_id, name = "Inbox" }
+  vim.api.nvim_set_hl(0, "TodoistEditProjectName", {})
   if task.project_id and state_obj.project_lookup then
     local p = state_obj.project_lookup[tostring(task.project_id)]
     if p then selected_project = { id = task.project_id, name = p.name } end
@@ -866,7 +862,11 @@ local function open_edit_window(task, state_obj)
     local updates = {}
     if new_content ~= (task.content or "") then updates.content = new_content end
     if new_description ~= (task.description or "") then updates.description = new_description end
-    if selected_project.id ~= task.project_id then updates.project_id = selected_project.id end
+    -- Compare as strings: task.project_id arrives from JSON as a number, selected_project.id is a string
+    if tostring(selected_project.id or "") ~= tostring(task.project_id or "") then
+      -- Send as the same type the API originally returned (number if parseable)
+      updates.project_id = tonumber(selected_project.id) or selected_project.id
+    end
 
     if not next(updates) then return end
     update_task_field(task.id, updates, state_obj)
