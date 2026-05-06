@@ -515,7 +515,7 @@ end
 local function refresh_with_loader(state_obj)
   if state_obj.is_loading then
     vim.notify("Refresh already in progress...", vim.log.levels.INFO)
-    return
+    return false
   end
 
   state_obj.is_loading = true
@@ -574,6 +574,7 @@ local function refresh_with_loader(state_obj)
       finish(nil)
     end
   end)
+  return true
 end
 
 local function enter_search_mode(state_obj)
@@ -1050,8 +1051,14 @@ function setup_actions(state_obj)
   vim.keymap.set('n', '<leader>tn', function() open_create_window(state_obj)         end, vim.tbl_extend("force", o, { desc = "Todoist: new task"               }))
   vim.keymap.set('n', '<leader>ts', function()
     state_obj.show_completed = not state_obj.show_completed
-    refresh_with_loader(state_obj)
-    vim.notify(state_obj.show_completed and "Showing completed tasks" or "Hiding completed tasks")
+    local msg = state_obj.show_completed and "Showing completed tasks" or "Hiding completed tasks"
+    if not refresh_with_loader(state_obj) then
+      -- refresh blocked (is_loading); revert the toggle so state stays consistent
+      state_obj.show_completed = not state_obj.show_completed
+      vim.notify("Refresh in progress, try again shortly", vim.log.levels.WARN)
+    else
+      vim.notify(msg)
+    end
   end, vim.tbl_extend("force", o, { desc = "Todoist: toggle completed tasks" }))
   vim.keymap.set('n', '/',          function() enter_search_mode(state_obj)          end, vim.tbl_extend("force", o, { desc = "Todoist: search tasks"           }))
 end
