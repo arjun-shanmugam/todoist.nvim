@@ -146,6 +146,14 @@ function M.close_task(token, task_id, cb)
   }, cb)
 end
 
+function M.reopen_task(token, task_id, cb)
+  request({
+    method = "POST",
+    path   = string.format("/tasks/%s/reopen", task_id),
+    token  = token,
+  }, cb)
+end
+
 function M.update_task(token, task_id, updates, cb)
   request({
     method = "POST",

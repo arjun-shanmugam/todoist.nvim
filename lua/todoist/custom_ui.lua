@@ -194,7 +194,8 @@ local function build_task_tree(tasks)
   return roots
 end
 
--- Group tasks by project; returns ordered list of groups with .roots (tree)
+-- Group tasks by project; returns ordered list of groups.
+-- Each group has .roots (active task tree) and .completed (sorted by completed_at asc).
 local function group_tasks_by_project(tasks, project_lookup)
   local group_map = {}
   local group_order = {}
@@ -203,18 +204,16 @@ local function group_tasks_by_project(tasks, project_lookup)
     local pid = tostring(task.project_id or "inbox")
     if not group_map[pid] then
       local project = project_lookup and project_lookup[pid]
-      local name, color
-      if project then
-        name  = project.name
-        color = project.color
-      else
-        name  = task.project_id and ("Project " .. task.project_id) or "Inbox"
-        color = project_color_to_ansi("charcoal")
-      end
-      group_map[pid] = { project_name = name, project_color = color, tasks = {} }
+      local name = project and project.name or (task.project_id and ("Project " .. task.project_id) or "Inbox")
+      local color = project and project.color or project_color_to_ansi("charcoal")
+      group_map[pid] = { project_name = name, project_color = color, active = {}, completed = {} }
       table.insert(group_order, pid)
     end
-    table.insert(group_map[pid].tasks, task)
+    if task.checked then
+      table.insert(group_map[pid].completed, task)
+    else
+      table.insert(group_map[pid].active, task)
+    end
   end
 
   table.sort(group_order, function(a, b)
@@ -224,7 +223,10 @@ local function group_tasks_by_project(tasks, project_lookup)
   local groups = {}
   for _, pid in ipairs(group_order) do
     local g = group_map[pid]
-    g.roots = build_task_tree(g.tasks)
+    table.sort(g.completed, function(a, b)
+      return (a.completed_at or "") < (b.completed_at or "")
+    end)
+    g.roots = build_task_tree(g.active)
     table.insert(groups, g)
   end
   return groups
@@ -276,8 +278,7 @@ local function count_tasks(nodes)
 end
 
 -- Render all tasks into buf; returns line_map, task_map, lines
--- completed_tasks: optional list of completed task objects rendered in a section at the top
-local function render_grouped_tasks(buf, tasks, project_lookup, completed_tasks)
+local function render_grouped_tasks(buf, tasks, project_lookup)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return {}, {}, {}
   end
@@ -288,39 +289,15 @@ local function render_grouped_tasks(buf, tasks, project_lookup, completed_tasks)
   local line_num = 1
   local has_tasks = false
 
-  -- Completed section (sorted oldest→newest by completed_at)
-  if completed_tasks and #completed_tasks > 0 then
-    table.sort(completed_tasks, function(a, b)
-      return (a.completed_at or "") < (b.completed_at or "")
-    end)
-
-    has_tasks = true
-    local header = format_project_header("Completed", #completed_tasks)
-    table.insert(lines, header)
-    line_map[line_num] = { type = "header", project_name = "Completed",
-                           project_color = project_color_to_ansi("charcoal") }
-    line_num = line_num + 1
-
-    for _, task in ipairs(completed_tasks) do
-      table.insert(lines, format_task_entry(task, 0))
-      line_map[line_num] = { type = "task", task_id = task.id, task = task, depth = 0 }
-      if task.id then task_map[tostring(task.id)] = task end
-      line_num = line_num + 1
-    end
-
-    table.insert(lines, "")
-    line_map[line_num] = { type = "separator" }
-    line_num = line_num + 1
-  end
-
-  -- Active tasks grouped by project
   local groups = group_tasks_by_project(tasks, project_lookup)
 
   for _, group in ipairs(groups) do
-    if #group.tasks > 0 then
+    local n_completed = #group.completed
+    local n_active    = count_tasks(group.roots)
+    if n_completed + n_active > 0 then
       has_tasks = true
 
-      local header = format_project_header(group.project_name, count_tasks(group.roots))
+      local header = format_project_header(group.project_name, n_completed + n_active)
       table.insert(lines, header)
       line_map[line_num] = {
         type = "header",
@@ -329,6 +306,15 @@ local function render_grouped_tasks(buf, tasks, project_lookup, completed_tasks)
       }
       line_num = line_num + 1
 
+      -- Completed tasks first (flat, sorted oldest→newest)
+      for _, task in ipairs(group.completed) do
+        table.insert(lines, format_task_entry(task, 0))
+        line_map[line_num] = { type = "task", task_id = task.id, task = task, depth = 0 }
+        if task.id then task_map[tostring(task.id)] = task end
+        line_num = line_num + 1
+      end
+
+      -- Then active tasks (with hierarchy)
       line_num = render_tree(group.roots, 0, lines, line_map, line_num, task_map)
 
       table.insert(lines, "")
@@ -488,9 +474,8 @@ local function refresh_ui(state_obj)
   if not state_obj or not vim.api.nvim_buf_is_valid(state_obj.buf) then return end
 
   local tasks_to_display = state_obj.search_mode and state_obj.filtered_tasks or state_obj.tasks
-  local completed = state_obj.show_completed and state_obj.completed_tasks or nil
 
-  local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, tasks_to_display, state_obj.project_lookup, completed)
+  local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, tasks_to_display, state_obj.project_lookup)
   state_obj.line_map = line_map
   state_obj.task_map = task_map
 
@@ -555,10 +540,14 @@ local function refresh_with_loader(state_obj)
           vim.notify("Warning: Failed to fetch projects: " .. project_err, vim.log.levels.WARN)
         end
 
-        local project_lookup  = build_project_lookup(projects)
-        state_obj.tasks          = tasks or {}
-        state_obj.filtered_tasks = tasks or {}
-        state_obj.completed_tasks = completed
+        -- Merge completed tasks into the main list (grouped rendering handles ordering)
+        local all_tasks = {}
+        for _, t in ipairs(tasks or {}) do table.insert(all_tasks, t) end
+        for _, t in ipairs(completed or {}) do table.insert(all_tasks, t) end
+
+        local project_lookup     = build_project_lookup(projects)
+        state_obj.tasks          = all_tasks
+        state_obj.filtered_tasks = all_tasks
         state_obj.project_lookup = project_lookup
 
         refresh_ui(state_obj)
@@ -979,15 +968,24 @@ local function handle_action(state_obj, action_type)
   local task = line_info.task
 
   if action_type == "complete" then
-    local init = require("todoist.init")
-    init.complete_task(task.id, function(close_err)
-      if close_err then
-        vim.notify(close_err, vim.log.levels.ERROR)
-        return
-      end
-      vim.notify(string.format("Completed task %s", task.content))
-      refresh_with_loader(state_obj)
-    end)
+    local auth   = require("todoist.auth")
+    local client = require("todoist.client")
+    local token  = auth.load_token()
+    if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
+
+    if task.checked then
+      client.reopen_task(token, task.id, function(err)
+        if err then vim.notify("Reopen failed: " .. err, vim.log.levels.ERROR); return end
+        vim.notify(string.format("Reopened: %s", task.content))
+        refresh_with_loader(state_obj)
+      end)
+    else
+      client.close_task(token, task.id, function(err)
+        if err then vim.notify("Complete failed: " .. err, vim.log.levels.ERROR); return end
+        vim.notify(string.format("Completed: %s", task.content))
+        refresh_with_loader(state_obj)
+      end)
+    end
 
   elseif action_type == "edit" then
     open_edit_window(task, state_obj)
@@ -1096,7 +1094,6 @@ function M.show_today(tasks, opts)
     search_mode    = false,
     search_query   = "",
     show_completed = false,
-    completed_tasks = nil,
     is_loading     = false,
     loader_id      = nil,
     on_refresh     = opts.on_refresh,
