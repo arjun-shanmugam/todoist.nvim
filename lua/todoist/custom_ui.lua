@@ -684,6 +684,7 @@ local function open_create_window(state_obj)
     local p = state_obj.project_lookup[tostring(cfg.default_project)]
     if p then selected_project = { id = cfg.default_project, name = p.name } end
   end
+  local selected_parent = nil  -- { id, content } or nil
 
   local buf = vim.api.nvim_create_buf(false, true)
   pcall(function()
@@ -706,9 +707,13 @@ local function open_create_window(state_obj)
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditLabel" })
 
   local function render_header()
+    local parent_name = selected_parent and selected_parent.content or "None"
     local opts = {
       virt_lines = {
         { { "  " .. selected_project.name, "TodoistEditProjectName" } },
+        { { sep,                            "TodoistEditSep"         } },
+        { { "  Parent Task",               "TodoistEditLabel"       } },
+        { { "  " .. parent_name,           "TodoistEditProjectName" } },
         { { sep,                            "TodoistEditSep"         } },
         { { "  Title",                      "TodoistEditLabel"       } },
       },
@@ -738,7 +743,7 @@ local function open_create_window(state_obj)
     style     = "minimal", border = "rounded", title = " New Task ", title_pos = "center",
   }
   pcall(function()
-    win_opts.footer     = "  <leader>tw save  ·  <leader>tp project  ·  <leader>tq close  "
+    win_opts.footer     = "  <leader>tw save  ·  <leader>tp project  ·  <leader>ta parent  ·  <leader>tq close  "
     win_opts.footer_pos = "center"
   end)
 
@@ -778,6 +783,7 @@ local function open_create_window(state_obj)
     if new_due ~= "" then payload.due_string = new_due end
     if new_description ~= "" then payload.description = new_description end
     if selected_project.id then payload.project_id = selected_project.id end
+    if selected_parent then payload.parent_id = selected_parent.id end
 
     require("todoist.client").add_task(token, payload, function(err, task)
       if err then vim.notify("Failed to create task: " .. err, vim.log.levels.ERROR); return end
@@ -792,14 +798,44 @@ local function open_create_window(state_obj)
     vim.ui.select(names, { prompt = "Select project: " }, function(choice)
       if not choice then return end
       for _, c in ipairs(choices) do
-        if c.name == choice then selected_project = c; render_header(); return end
+        if c.name == choice then
+          selected_project = c
+          selected_parent  = nil  -- clear parent; it belongs to the old project
+          render_header()
+          return
+        end
       end
     end)
   end
 
+  local function pick_parent()
+    -- Candidates: active tasks in the currently selected project
+    local candidates = {}
+    for _, task in ipairs(state_obj.tasks or {}) do
+      if not task.checked
+        and tostring(task.project_id or "") == tostring(selected_project.id or "")
+      then
+        table.insert(candidates, task)
+      end
+    end
+    table.sort(candidates, function(a, b)
+      return (a.content or ""):lower() < (b.content or ""):lower()
+    end)
+    local names = { "  None (top-level task)" }
+    for _, t in ipairs(candidates) do
+      table.insert(names, "  " .. (t.content or "(no content)"))
+    end
+    vim.ui.select(names, { prompt = "Select parent task: " }, function(_, idx)
+      if not idx then return end
+      selected_parent = idx == 1 and nil or candidates[idx - 1]
+      render_header()
+    end)
+  end
+
   local o = { buffer = buf, noremap = true, silent = true }
-  vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save new task"  }))
-  vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project" }))
+  vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save new task"    }))
+  vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project"   }))
+  vim.keymap.set('n', '<leader>ta', pick_parent,    vim.tbl_extend("force", o, { desc = "Todoist: assign parent"    }))
   local function close()
     pcall(vim.api.nvim_win_close, win, true)
     vim.schedule(function()
@@ -901,7 +937,7 @@ local function open_edit_window(task, state_obj)
     style     = "minimal", border = "rounded", title = " Edit Task ", title_pos = "center",
   }
   pcall(function()
-    win_opts.footer     = "  <leader>tw save  ·  <leader>tp project  ·  <leader>tq close  "
+    win_opts.footer     = "  <leader>tw save  ·  <leader>tp project  ·  <leader>ta parent  ·  <leader>tq close  "
     win_opts.footer_pos = "center"
   end)
 
