@@ -242,12 +242,15 @@ local function render_tree(nodes, depth, lines, line_map, line_num, task_map)
 
     -- Inline description (non-empty, non-blank lines only)
     if task.description and task.description ~= "" then
-      local desc_indent = string.rep("  ", (depth or 0) + 2) .. "↳ "
+      local base_indent = string.rep("  ", (depth or 0) + 2)
+      local first_line = true
       for desc_line in (task.description .. "\n"):gmatch("([^\n]*)\n") do
         if desc_line ~= "" then
-          table.insert(lines, desc_indent .. desc_line)
+          local prefix = first_line and (base_indent .. "↳ ") or (base_indent .. "  ")
+          table.insert(lines, prefix .. desc_line)
           line_map[line_num] = { type = "description" }
           line_num = line_num + 1
+          first_line = false
         end
       end
     end
