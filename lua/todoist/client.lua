@@ -180,11 +180,38 @@ function M.get_task(token, task_id, cb)
   }, cb)
 end
 
+function M.fetch_completed_tasks(token, cb)
+  request({
+    method = "GET",
+    path   = "/tasks/completed",
+    token  = token,
+  }, function(err, data)
+    if err then return cb(err) end
+    local items = type(data) == "table" and data.items or {}
+    local tasks = {}
+    for _, item in ipairs(items) do
+      table.insert(tasks, {
+        id           = item.task_id,
+        content      = item.content or "",
+        project_id   = item.project_id,
+        checked      = true,
+        completed_at = item.completed_at,
+        priority     = 1,
+        parent_id    = nil,
+        description  = "",
+        due          = nil,
+        children     = {},
+      })
+    end
+    cb(nil, tasks)
+  end)
+end
+
 function M.fetch_projects(token, cb)
   request({
     method = "GET",
-    path = "/projects",
-    token = token,
+    path   = "/projects",
+    token  = token,
   }, function(err, data)
     if err then return cb(err) end
     cb(nil, type(data) == "table" and data.results or data)

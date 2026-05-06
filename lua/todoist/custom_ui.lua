@@ -276,7 +276,8 @@ local function count_tasks(nodes)
 end
 
 -- Render all tasks into buf; returns line_map, task_map, lines
-local function render_grouped_tasks(buf, tasks, project_lookup)
+-- completed_tasks: optional list of completed task objects rendered in a section at the top
+local function render_grouped_tasks(buf, tasks, project_lookup, completed_tasks)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return {}, {}, {}
   end
@@ -285,9 +286,35 @@ local function render_grouped_tasks(buf, tasks, project_lookup)
   local task_map = {}
   local line_map = {}
   local line_num = 1
-
-  local groups   = group_tasks_by_project(tasks, project_lookup)
   local has_tasks = false
+
+  -- Completed section (sorted oldest→newest by completed_at)
+  if completed_tasks and #completed_tasks > 0 then
+    table.sort(completed_tasks, function(a, b)
+      return (a.completed_at or "") < (b.completed_at or "")
+    end)
+
+    has_tasks = true
+    local header = format_project_header("Completed", #completed_tasks)
+    table.insert(lines, header)
+    line_map[line_num] = { type = "header", project_name = "Completed",
+                           project_color = project_color_to_ansi("charcoal") }
+    line_num = line_num + 1
+
+    for _, task in ipairs(completed_tasks) do
+      table.insert(lines, format_task_entry(task, 0))
+      line_map[line_num] = { type = "task", task_id = task.id, task = task, depth = 0 }
+      if task.id then task_map[tostring(task.id)] = task end
+      line_num = line_num + 1
+    end
+
+    table.insert(lines, "")
+    line_map[line_num] = { type = "separator" }
+    line_num = line_num + 1
+  end
+
+  -- Active tasks grouped by project
+  local groups = group_tasks_by_project(tasks, project_lookup)
 
   for _, group in ipairs(groups) do
     if #group.tasks > 0 then
@@ -461,8 +488,9 @@ local function refresh_ui(state_obj)
   if not state_obj or not vim.api.nvim_buf_is_valid(state_obj.buf) then return end
 
   local tasks_to_display = state_obj.search_mode and state_obj.filtered_tasks or state_obj.tasks
+  local completed = state_obj.show_completed and state_obj.completed_tasks or nil
 
-  local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, tasks_to_display, state_obj.project_lookup)
+  local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, tasks_to_display, state_obj.project_lookup, completed)
   state_obj.line_map = line_map
   state_obj.task_map = task_map
 
@@ -510,8 +538,7 @@ local function refresh_with_loader(state_obj)
   end
 
   local client = require("todoist.client")
-  local filter = state_obj.show_completed and "today | (completed & today)" or "today"
-  client.fetch_tasks(token, { filter = filter }, function(err, tasks)
+  client.fetch_tasks(token, {}, function(err, tasks)
     if err then
       loader.stop(state_obj.loader_id)
       state_obj.is_loading = false
@@ -519,22 +546,33 @@ local function refresh_with_loader(state_obj)
       return
     end
 
-    client.fetch_projects(token, function(project_err, projects)
-      loader.stop(state_obj.loader_id)
-      state_obj.is_loading = false
+    local function finish(completed)
+      client.fetch_projects(token, function(project_err, projects)
+        loader.stop(state_obj.loader_id)
+        state_obj.is_loading = false
 
-      if project_err then
-        vim.notify("Warning: Failed to fetch projects: " .. project_err, vim.log.levels.WARN)
-      end
+        if project_err then
+          vim.notify("Warning: Failed to fetch projects: " .. project_err, vim.log.levels.WARN)
+        end
 
-      local project_lookup = build_project_lookup(projects)
-      state_obj.tasks          = tasks or {}
-      state_obj.filtered_tasks = tasks or {}
-      state_obj.project_lookup = project_lookup
+        local project_lookup  = build_project_lookup(projects)
+        state_obj.tasks          = tasks or {}
+        state_obj.filtered_tasks = tasks or {}
+        state_obj.completed_tasks = completed
+        state_obj.project_lookup = project_lookup
 
-      refresh_ui(state_obj)
-      vim.notify("Tasks refreshed", vim.log.levels.INFO)
-    end)
+        refresh_ui(state_obj)
+        vim.notify("Tasks refreshed", vim.log.levels.INFO)
+      end)
+    end
+
+    if state_obj.show_completed then
+      client.fetch_completed_tasks(token, function(cerr, completed)
+        finish(cerr and {} or completed)
+      end)
+    else
+      finish(nil)
+    end
   end)
 end
 
@@ -1051,6 +1089,7 @@ function M.show_today(tasks, opts)
     search_mode    = false,
     search_query   = "",
     show_completed = false,
+    completed_tasks = nil,
     is_loading     = false,
     loader_id      = nil,
     on_refresh     = opts.on_refresh,
