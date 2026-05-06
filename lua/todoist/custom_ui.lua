@@ -962,7 +962,7 @@ function update_task_field(task_id, updates, new_project_id, state_obj)
       if err then vim.notify("Update failed: " .. err, vim.log.levels.ERROR); return end
       do_move_then_refresh()
     end)
-  else
+  elseif new_project_id then
     do_move_then_refresh()
   end
 end
