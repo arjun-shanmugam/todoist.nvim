@@ -644,6 +644,8 @@ local function open_create_window(state_obj)
   vim.api.nvim_set_hl(0, "TodoistEditSep",         { fg = "#44475a" })
   vim.api.nvim_set_hl(0, "TodoistEditLabel",       { fg = "#6272a4", italic = true })
   vim.api.nvim_set_hl(0, "TodoistEditProjectName", {})
+
+  local cfg = require("todoist.config").get()
   local selected_project = { id = nil, name = "Inbox" }
   if cfg.default_project and state_obj.project_lookup then
     local p = state_obj.project_lookup[tostring(cfg.default_project)]
