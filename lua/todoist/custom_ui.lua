@@ -156,6 +156,7 @@ local function create_window()
     vim.api.nvim_win_set_option(win, 'cursorline', true)
     vim.api.nvim_win_set_option(win, 'wrap', true)
     vim.api.nvim_win_set_option(win, 'linebreak', true)
+    vim.api.nvim_win_set_option(win, 'breakindent', true)
   end)
 
   return { buf = buf, win = win }
