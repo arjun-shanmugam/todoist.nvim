@@ -252,7 +252,7 @@ local function setup_commands()
 
   vim.api.nvim_create_user_command("TodoistTasks", function(opts)
     refresh_tasks({
-      project_id = tonumber(opts.args) or config.get().default_project,
+      project_id = opts.args ~= "" and opts.args or config.get().default_project,
     })
   end, { nargs = "?" })
 

@@ -117,28 +117,23 @@ local function format_today_entry(task, opts)
   local priority = task.priority or 1
 
   local id_part = string.format("[ID:%s]", task.id or "?")
-  local priority_part = colorize(string.format("[P%d]", priority), priority_colors[priority] or priority_colors[1])
   local project_part = colorize("#" .. (project.name or "Project"), project.color)
 
   local due_suffix = ""
   if task.due and type(task.due) == "table" then
-    local time = nil
-    if task.due.datetime then
-      time = task.due.datetime:match("T(%d%d:%d%d)")
-    end
-    local label = time or task.due.string or task.due.date
+    local label = task.due.string or task.due.date
     if label and label ~= "" then
       due_suffix = " @" .. label
     end
   end
 
-  local content = task.content or "(no content)"
+  -- Color task content by priority
+  local content = colorize((task.content or "(no content)") .. due_suffix, priority_colors[priority] or priority_colors[1])
 
   return table.concat({
     id_part,
-    priority_part,
     project_part,
-    content .. due_suffix,
+    content,
   }, "  ")
 end
 
@@ -147,7 +142,7 @@ local function format_task_preview(task, opts)
   local priority = task.priority or 1
   local due = ""
   if task.due and type(task.due) == "table" then
-    due = task.due.string or task.due.datetime or task.due.date or ""
+    due = task.due.string or task.due.date or ""
   end
 
   local lines = {
@@ -171,7 +166,7 @@ local function format_task_preview(task, opts)
 end
 
 local function parse_task_from_entry(entry)
-  local id = entry:match("%[ID:(%d+)%]")
+  local id = entry:match("%[ID:([^%]]+)%]")
   if not id then return nil end
   return { id = id }
 end
@@ -589,64 +584,98 @@ function M.show_tasks(tasks, opts)
   open_picker(tasks or {}, opts)
 end
 
-local function today_sorter(project_lookup)
-  project_lookup = project_lookup or {}
-  return function(a, b)
-    local pa = a.priority or 1
-    local pb = b.priority or 1
-    if pa ~= pb then
-      return pa > pb
-    end
+-- Group tasks by project, returning ordered groups and a flat task_map
+local function group_tasks_by_project(tasks, project_lookup)
+  local group_map = {}
+  local group_order = {}
+  local task_map = {}
 
-    local proj_a = resolve_project(a, project_lookup)
-    local proj_b = resolve_project(b, project_lookup)
-    local name_a = (proj_a.name or ""):lower()
-    local name_b = (proj_b.name or ""):lower()
-    if name_a ~= name_b then
-      return name_a < name_b
+  for _, task in ipairs(tasks or {}) do
+    local pid = tostring(task.project_id or "inbox")
+    if not group_map[pid] then
+      local project = project_lookup and project_lookup[pid]
+      local name, color
+      if project then
+        name = project.name
+        color = project.color
+      else
+        name = task.project_id and ("Project " .. task.project_id) or "Inbox"
+        color = project_color_to_ansi("charcoal")
+      end
+      group_map[pid] = {
+        project_name = name,
+        project_color = color,
+        tasks = {},
+      }
+      table.insert(group_order, pid)
     end
-
-    local due_a = ""
-    local due_b = ""
-    if a.due and type(a.due) == "table" then
-      due_a = a.due.datetime or a.due.date or ""
+    table.insert(group_map[pid].tasks, task)
+    if task.id then
+      task_map[tostring(task.id)] = task
     end
-    if b.due and type(b.due) == "table" then
-      due_b = b.due.datetime or b.due.date or ""
-    end
-    if due_a ~= due_b then
-      return due_a < due_b
-    end
-
-    return (a.id or 0) < (b.id or 0)
   end
+
+  -- Sort groups alphabetically by project name
+  table.sort(group_order, function(a, b)
+    return (group_map[a].project_name or ""):lower() < (group_map[b].project_name or ""):lower()
+  end)
+
+  local groups = {}
+  for _, pid in ipairs(group_order) do
+    table.insert(groups, group_map[pid])
+  end
+  return groups, task_map
 end
 
 function M.show_today(tasks, opts)
   opts = opts or {}
+  local ok, fzf = pcall(require, "fzf-lua")
+  if not ok then
+    error("fzf-lua is required. Install it with your plugin manager.")
+  end
+
   local cfg = require("todoist.config").get()
   opts.project_lookup = opts.project_lookup or build_project_lookup(opts.projects)
   opts.prompt = opts.prompt or "Todoist Today> "
-  opts.sorter = opts.sorter or today_sorter(opts.project_lookup)
-  opts.format_entry = function(task)
-    return format_today_entry(task, opts)
-  end
-  opts.fzf_opts = merge_tables({ ["--ansi"] = "" }, opts.fzf_opts)
-  local preview_cfg = cfg.fzf.preview or {}
-  local preview_enabled = opts.preview
-  if preview_enabled == nil then
-    if preview_cfg.today == nil then
-      preview_enabled = false
-    else
-      preview_enabled = preview_cfg.today ~= false
+
+  -- Build project-grouped entries with ANSI-colored headers
+  local groups, task_map = group_tasks_by_project(tasks, opts.project_lookup)
+
+  local entries = {}
+  for _, group in ipairs(groups) do
+    -- Project section header (colorized, not selectable as a task)
+    local header = colorize(
+      string.format("  ── %s  (%d) ──", group.project_name, #group.tasks),
+      group.project_color
+    )
+    table.insert(entries, header)
+
+    -- Sort tasks within group by priority descending
+    table.sort(group.tasks, function(a, b)
+      return (a.priority or 1) > (b.priority or 1)
+    end)
+
+    for _, task in ipairs(group.tasks) do
+      table.insert(entries, format_today_entry(task, opts))
     end
-  end
-  opts.preview = preview_enabled
-  if preview_enabled then
-    opts.winopts = opts.winopts or vim.tbl_deep_extend("force", {}, cfg.fzf.winopts or {}, preview_cfg.today_winopts or {})
+
+    table.insert(entries, "")  -- blank separator between groups
   end
 
-  open_picker(tasks or {}, opts)
+  if #entries == 0 then
+    vim.notify("No tasks found", vim.log.levels.INFO)
+    return
+  end
+
+  local previewer = create_previewer(task_map, opts)
+
+  fzf.fzf_exec(entries, {
+    prompt = opts.prompt,
+    winopts = cfg.fzf.winopts,
+    actions = create_actions(task_map, opts),
+    previewer = previewer,
+    fzf_opts = { ["--ansi"] = "", ["--no-multi"] = "", ["--layout"] = "reverse" },
+  })
 end
 
 return M

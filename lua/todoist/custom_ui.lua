@@ -144,30 +144,21 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "TodoistSeparator", { fg = "#44475a" })
 end
 
--- Format task entry for display (adapted from fzf.lua)
+-- Format task entry for display within a project section
 local function format_task_entry(task, project_lookup)
-  local project = resolve_project(task, project_lookup)
   local priority = task.priority or 1
-
-  local id_part = string.format("[ID:%s]", task.id or "?")
   local priority_part = string.format("[P%d]", priority)
-  local project_part = "#" .. (project.name or "Project")
 
   local due_suffix = ""
   if task.due and type(task.due) == "table" then
-    local time = nil
-    if task.due.datetime then
-      time = task.due.datetime:match("T(%d%d:%d%d)")
-    end
-    local label = time or task.due.string or task.due.date
+    local label = task.due.string or task.due.date
     if label and label ~= "" then
       due_suffix = " @" .. label
     end
   end
 
   local content = task.content or "(no content)"
-
-  return string.format("%s  %s  %s  %s%s", id_part, priority_part, project_part, content, due_suffix)
+  return string.format("  %s  %s%s", priority_part, content, due_suffix)
 end
 
 -- Create split layout with buffers and windows
@@ -256,37 +247,52 @@ local function create_split_layout()
   }
 end
 
--- Group tasks by priority
-local function group_tasks_by_priority(tasks)
-  local grouped = {
-    [4] = {},
-    [3] = {},
-    [2] = {},
-    [1] = {},
-  }
+-- Group tasks by project, returning ordered list of {project_id, project_name, project_color, tasks}
+local function group_tasks_by_project(tasks, project_lookup)
+  local group_map = {}
+  local group_order = {}
 
   for _, task in ipairs(tasks or {}) do
-    local priority = task.priority or 1
-    table.insert(grouped[priority], task)
+    local pid = tostring(task.project_id or "inbox")
+    if not group_map[pid] then
+      local project = project_lookup and project_lookup[pid]
+      local name, color
+      if project then
+        name = project.name
+        color = project.color
+      else
+        name = task.project_id and ("Project " .. task.project_id) or "Inbox"
+        color = project_color_to_ansi("charcoal")
+      end
+      group_map[pid] = {
+        project_id = pid,
+        project_name = name,
+        project_color = color,
+        tasks = {},
+      }
+      table.insert(group_order, pid)
+    end
+    table.insert(group_map[pid].tasks, task)
   end
 
-  return grouped
+  -- Sort groups alphabetically by project name
+  table.sort(group_order, function(a, b)
+    return (group_map[a].project_name or ""):lower() < (group_map[b].project_name or ""):lower()
+  end)
+
+  local groups = {}
+  for _, pid in ipairs(group_order) do
+    table.insert(groups, group_map[pid])
+  end
+  return groups
 end
 
--- Format priority header
-local function format_priority_header(priority, count)
-  local labels = {
-    [4] = "URGENT",
-    [3] = "HIGH",
-    [2] = "MEDIUM",
-    [1] = "NORMAL",
-  }
-
-  local label = labels[priority] or "UNKNOWN"
-  return string.format("━━━ %s PRIORITY (%d tasks) ━━━", label, count)
+-- Format project section header
+local function format_project_header(name, count)
+  return string.format("━━━ %s (%d tasks) ━━━", name, count)
 end
 
--- Render grouped task list with priority headers
+-- Render tasks grouped by project
 local function render_grouped_tasks(buf, tasks, project_lookup)
   -- Validate buffer
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
@@ -298,22 +304,30 @@ local function render_grouped_tasks(buf, tasks, project_lookup)
   local line_map = {}
   local line_num = 1
 
-  -- Group tasks by priority
-  local grouped = group_tasks_by_priority(tasks)
+  local groups = group_tasks_by_project(tasks, project_lookup)
 
   local has_tasks = false
-  for _, priority in ipairs({ 4, 3, 2, 1 }) do
-    if #grouped[priority] > 0 then
+  for _, group in ipairs(groups) do
+    if #group.tasks > 0 then
       has_tasks = true
 
-      -- Add priority header
-      local header = format_priority_header(priority, #grouped[priority])
+      -- Sort tasks within group by priority descending
+      table.sort(group.tasks, function(a, b)
+        return (a.priority or 1) > (b.priority or 1)
+      end)
+
+      -- Add project header
+      local header = format_project_header(group.project_name, #group.tasks)
       table.insert(lines, header)
-      line_map[line_num] = { type = "header", priority = priority }
+      line_map[line_num] = {
+        type = "header",
+        project_name = group.project_name,
+        project_color = group.project_color,
+      }
       line_num = line_num + 1
 
-      -- Add tasks in this priority group
-      for _, task in ipairs(grouped[priority]) do
+      -- Add tasks in this group
+      for _, task in ipairs(group.tasks) do
         local line = format_task_entry(task, project_lookup)
         table.insert(lines, line)
         line_map[line_num] = { type = "task", task_id = task.id, task = task }
@@ -323,12 +337,10 @@ local function render_grouped_tasks(buf, tasks, project_lookup)
         line_num = line_num + 1
       end
 
-      -- Add separator between groups (except after last group)
-      if priority > 1 then
-        table.insert(lines, "")
-        line_map[line_num] = { type = "separator" }
-        line_num = line_num + 1
-      end
+      -- Separator between groups
+      table.insert(lines, "")
+      line_map[line_num] = { type = "separator" }
+      line_num = line_num + 1
     end
   end
 
@@ -372,35 +384,31 @@ local function apply_highlights(buf, lines, line_map)
     local line_idx = line_num - 1 -- 0-indexed
     if line_idx >= 0 and line_idx < #lines then
       if line_info.type == "header" then
-        -- Highlight entire header line
-        local hl_group = "TodoistP" .. (line_info.priority or 1)
-        pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl_group, line_idx, 0, -1)
+        -- Color project header with the project's color, or fall back to TodoistProject
+        local hex = ansi_to_hex(line_info.project_color or 240)
+        local hl_name = "TodoistProjectHeader_" .. hex:gsub("#", "")
+        pcall(vim.api.nvim_set_hl, 0, hl_name, { fg = hex, bold = true })
+        pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl_name, line_idx, 0, -1)
       elseif line_info.type == "task" then
         local task = line_info.task
         local line = lines[line_num]
 
         if not line then goto continue end
 
-        -- Highlight task ID [ID:xxx]
-        local id_start, id_end = line:find("%[ID:[^%]]+%]")
-        if id_start then
-          pcall(vim.api.nvim_buf_add_highlight, buf, ns, "TodoistTaskId", line_idx, id_start - 1, id_end)
-        end
-
-        -- Highlight priority badge [Px]
         local priority = task.priority or 1
+
+        -- Highlight [Px] badge with priority color
         local p_start, p_end = line:find("%[P%d%]")
         if p_start then
           pcall(vim.api.nvim_buf_add_highlight, buf, ns, "TodoistP" .. priority, line_idx, p_start - 1, p_end)
         end
 
-        -- Highlight project tag #ProjectName
-        local proj_start, proj_end = line:find("#[^%s]+")
-        if proj_start then
-          pcall(vim.api.nvim_buf_add_highlight, buf, ns, "TodoistProject", line_idx, proj_start - 1, proj_end)
+        -- Highlight task content (after [Px]) with priority color
+        if p_end then
+          pcall(vim.api.nvim_buf_add_highlight, buf, ns, "TodoistP" .. priority, line_idx, p_end + 1, -1)
         end
 
-        -- Highlight due time @time
+        -- Highlight due time @time with its own color (overrides priority on @)
         local time_start, time_end = line:find("@[^%s]+")
         if time_start then
           pcall(vim.api.nvim_buf_add_highlight, buf, ns, "TodoistDueTime", line_idx, time_start - 1, time_end)
@@ -448,10 +456,10 @@ local function format_task_preview_detailed(task, project_lookup)
     table.insert(lines, "  Due:       No due date")
   end
 
-  -- Created date
-  if task.created_at then
-    local created = task.created_at:match("(%d%d%d%d%-%d%d%-%d%d)") or task.created_at
-    table.insert(lines, "  Created:   " .. created)
+  -- Added date (v1 field name)
+  if task.added_at then
+    local added = task.added_at:match("(%d%d%d%d%-%d%d%-%d%d)") or task.added_at
+    table.insert(lines, "  Added:     " .. added)
   end
 
   -- Labels

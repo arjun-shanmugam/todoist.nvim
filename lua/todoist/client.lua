@@ -123,7 +123,10 @@ function M.fetch_tasks(token, opts, cb)
       project_id = opts and opts.project_id or nil,
       filter = opts and opts.filter or nil,
     },
-  }, cb)
+  }, function(err, data)
+    if err then return cb(err) end
+    cb(nil, type(data) == "table" and data.results or data)
+  end)
 end
 
 function M.add_task(token, task, cb)
@@ -173,7 +176,10 @@ function M.fetch_projects(token, cb)
     method = "GET",
     path = "/projects",
     token = token,
-  }, cb)
+  }, function(err, data)
+    if err then return cb(err) end
+    cb(nil, type(data) == "table" and data.results or data)
+  end)
 end
 
 return M

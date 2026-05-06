@@ -1,7 +1,7 @@
 local M = {}
 
 local defaults = {
-  api_base = "https://api.todoist.com/rest/v2",
+  api_base = "https://api.todoist.com/api/v1",
   data_dir = vim.fn.stdpath("data") .. "/todoist",
   token = nil,
   default_project = nil,
