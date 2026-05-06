@@ -649,22 +649,21 @@ local function open_edit_window(task, state_obj)
 
   local ns = vim.api.nvim_create_namespace("todoist_edit_ui")
 
+  -- "Title" label above line 1, left-justified
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    virt_lines       = { { { "  Title", "TodoistEditLabel" } } },
+    virt_lines_above = true,
+  })
   -- Highlight entire title line
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
     line_hl_group = "TodoistEditTitle",
   })
-  -- "Title" label right-aligned on line 1
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    virt_text     = { { "  Title  ", "TodoistEditLabel" } },
-    virt_text_pos = "right_align",
-    priority      = 100,
-  })
-  -- Visual separator + Description label between title and description (virtual lines, not real)
+  -- Separator + "Description" label above the description section, left-justified
   local sep_text = string.rep("─", width - 2)
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
     virt_lines = {
-      { { sep_text,          "TodoistEditSep"   } },
-      { { "  Description",   "TodoistEditLabel" } },
+      { { sep_text,        "TodoistEditSep"   } },
+      { { "  Description", "TodoistEditLabel" } },
     },
     virt_lines_above = false,
   })
