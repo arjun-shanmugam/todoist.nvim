@@ -891,8 +891,9 @@ local function open_edit_window(task, state_obj)
     if new_content ~= (task.content or "") then updates.content = new_content end
     if new_description ~= (task.description or "") then updates.description = new_description end
     if new_due ~= original_due then
-      updates.due_string = new_due ~= "" and new_due or vim.NIL
-      -- Todoist v1 requires content to be present when modifying due_string
+      -- "no date" is the Todoist API magic string for removing a due date
+      updates.due_string = new_due ~= "" and new_due or "no date"
+      -- API requires content to be present when modifying due_string
       if not updates.content then updates.content = new_content end
     end
 
