@@ -660,29 +660,37 @@ local function open_create_window(state_obj)
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
   end)
 
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "" })
+  -- Layout: line 0 = "  Project" (header, ignored on save)
+  --         line 1 = title
+  --         lines 2+ = description
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "  Project", "", "" })
 
   local ns     = vim.api.nvim_create_namespace("todoist_create_ui")
   local sep    = string.rep("─", width - 2)
   local hdr_id = nil
 
+  -- Highlight the Project header line (muted, non-editable look)
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditLabel" })
+
+  -- Project name + separators rendered below line 0 (virt_lines_above=false: between line 0 and line 1)
   local function render_header()
     local opts = {
       virt_lines = {
-        { { "  Project",                    "TodoistEditLabel"       } },
         { { "  " .. selected_project.name, "TodoistEditProjectName" } },
         { { sep,                            "TodoistEditSep"         } },
         { { "  Title",                      "TodoistEditLabel"       } },
       },
-      virt_lines_above = true,
+      virt_lines_above = false,
     }
     if hdr_id then opts.id = hdr_id end
     hdr_id = vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, opts)
   end
 
   render_header()
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditTitle" })
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+
+  -- Title line highlight + Description section below it
+  vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, { line_hl_group = "TodoistEditTitle" })
+  vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, {
     virt_lines       = { { { sep, "TodoistEditSep" } }, { { "  Description", "TodoistEditLabel" } } },
     virt_lines_above = false,
   })
@@ -701,18 +709,19 @@ local function open_create_window(state_obj)
   pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
   pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
 
-  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  -- Start cursor on the title line (line 2 in 1-indexed)
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
   vim.cmd("startinsert!")
 
   local function save_and_close()
     local lines       = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local new_content = vim.trim(lines[1] or "")
+    local new_content = vim.trim(lines[2] or "")  -- line 1 (0-idx) = title
     if new_content == "" then
       vim.notify("Task title cannot be empty", vim.log.levels.WARN)
       return
     end
     local desc_parts = {}
-    for i = 2, #lines do table.insert(desc_parts, lines[i]) end
+    for i = 3, #lines do table.insert(desc_parts, lines[i]) end
     while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
       table.remove(desc_parts)
     end
@@ -766,7 +775,6 @@ local function open_edit_window(task, state_obj)
   vim.api.nvim_set_hl(0, "TodoistEditLabel",       { fg = "#6272a4", italic = true })
   vim.api.nvim_set_hl(0, "TodoistEditProjectName", { fg = "#f8f8f2" })
 
-  -- Resolve current project for this task
   local selected_project = { id = task.project_id, name = "Inbox" }
   if task.project_id and state_obj.project_lookup then
     local p = state_obj.project_lookup[tostring(task.project_id)]
@@ -781,8 +789,11 @@ local function open_edit_window(task, state_obj)
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
   end)
 
+  -- Layout: line 0 = "  Project" (header, ignored on save)
+  --         line 1 = title
+  --         lines 2+ = description
   local desc_text = (task.description or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-  local initial = { task.content or "" }
+  local initial   = { "  Project", task.content or "" }
   if desc_text ~= "" then
     for line in (desc_text .. "\n"):gmatch("([^\n]*)\n") do
       table.insert(initial, line)
@@ -796,23 +807,25 @@ local function open_edit_window(task, state_obj)
   local sep    = string.rep("─", width - 2)
   local hdr_id = nil
 
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditLabel" })
+
   local function render_header()
     local opts = {
       virt_lines = {
-        { { "  Project",                    "TodoistEditLabel"       } },
         { { "  " .. selected_project.name, "TodoistEditProjectName" } },
         { { sep,                            "TodoistEditSep"         } },
         { { "  Title",                      "TodoistEditLabel"       } },
       },
-      virt_lines_above = true,
+      virt_lines_above = false,
     }
     if hdr_id then opts.id = hdr_id end
     hdr_id = vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, opts)
   end
 
   render_header()
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditTitle" })
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+
+  vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, { line_hl_group = "TodoistEditTitle" })
+  vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, {
     virt_lines       = { { { sep, "TodoistEditSep" } }, { { "  Description", "TodoistEditLabel" } } },
     virt_lines_above = false,
   })
@@ -831,18 +844,19 @@ local function open_edit_window(task, state_obj)
   pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
   pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
 
-  vim.api.nvim_win_set_cursor(win, { 1, #initial[1] })
+  -- Cursor at end of title (line 2, 1-indexed), enter insert mode
+  vim.api.nvim_win_set_cursor(win, { 2, #(task.content or "") })
   vim.cmd("startinsert!")
 
   local function save_and_close()
     local lines       = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local new_content = vim.trim(lines[1] or "")
+    local new_content = vim.trim(lines[2] or "")  -- line index 1 (0-based) = title
     if new_content == "" then
       vim.notify("Task title cannot be empty", vim.log.levels.WARN)
       return
     end
     local desc_parts = {}
-    for i = 2, #lines do table.insert(desc_parts, lines[i]) end
+    for i = 3, #lines do table.insert(desc_parts, lines[i]) end
     while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
       table.remove(desc_parts)
     end
