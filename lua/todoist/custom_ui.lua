@@ -623,7 +623,7 @@ local function open_edit_window(task, state_obj)
   local col     = math.floor((total_w - width) / 2)
 
   -- Edit window highlight groups
-  vim.api.nvim_set_hl(0, "TodoistEditTitle", { fg = "#f8f8f2", bold = true })
+  vim.api.nvim_set_hl(0, "TodoistEditTitle", { bold = true })
   vim.api.nvim_set_hl(0, "TodoistEditSep",   { fg = "#44475a" })
   vim.api.nvim_set_hl(0, "TodoistEditLabel", { fg = "#6272a4", italic = true })
 
