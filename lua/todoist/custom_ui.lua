@@ -613,6 +613,102 @@ local function setup_autocmds(state_obj)
   })
 end
 
+-- Floating editor for task title + description
+local function open_edit_window(task, state_obj)
+  local total_w = vim.o.columns
+  local total_h = vim.o.lines
+  local width   = math.floor(total_w * 0.55)
+  local height  = math.floor(total_h * 0.45)
+  local row     = math.floor((total_h - height) / 2)
+  local col     = math.floor((total_w - width) / 2)
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  pcall(function()
+    vim.api.nvim_buf_set_option(buf, 'buftype', 'nofile')
+    vim.api.nvim_buf_set_option(buf, 'swapfile', false)
+    vim.api.nvim_buf_set_option(buf, 'bufhidden', 'wipe')
+    vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
+  end)
+
+  -- Line 1: title, line 2: blank separator, lines 3+: description
+  local initial = { task.content or "" , "" }
+  if task.description and task.description ~= "" then
+    for line in (task.description .. "\n"):gmatch("([^\n]*)\n") do
+      table.insert(initial, line)
+    end
+  else
+    table.insert(initial, "")
+  end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial)
+
+  -- Right-aligned virtual text labels so the user knows what each section is
+  local ns = vim.api.nvim_create_namespace("todoist_edit_ui")
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    virt_text = { { "title", "Comment" } }, virt_text_pos = "right_align",
+  })
+  vim.api.nvim_buf_set_extmark(buf, ns, 2, 0, {
+    virt_text = { { "description", "Comment" } }, virt_text_pos = "right_align",
+  })
+
+  local win_opts = {
+    relative  = "editor",
+    width     = width, height = height, row = row, col = col,
+    style     = "minimal", border = "rounded",
+    title     = " Edit Task ", title_pos = "center",
+  }
+  -- footer requires nvim 0.10+; ignore silently on older versions
+  pcall(function()
+    win_opts.footer     = "  <leader>w  save    q  cancel  "
+    win_opts.footer_pos = "center"
+  end)
+
+  local win = vim.api.nvim_open_win(buf, true, win_opts)
+  pcall(vim.api.nvim_win_set_option, win, 'wrap', true)
+  pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
+
+  -- Position cursor at end of title line and enter insert mode
+  vim.api.nvim_win_set_cursor(win, { 1, #initial[1] })
+  vim.cmd("startinsert!")
+
+  local function save_and_close()
+    local lines       = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local new_content = vim.trim(lines[1] or "")
+    if new_content == "" then
+      vim.notify("Task title cannot be empty", vim.log.levels.WARN)
+      return
+    end
+
+    -- Everything from line 3 onwards is the description
+    local desc_parts = {}
+    for i = 3, #lines do table.insert(desc_parts, lines[i]) end
+    -- Trim trailing blank lines
+    while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
+      table.remove(desc_parts)
+    end
+    local new_description = table.concat(desc_parts, "\n")
+
+    pcall(vim.api.nvim_win_close, win, true)
+
+    local updates = {}
+    if new_content ~= (task.content or "") then
+      updates.content = new_content
+    end
+    if new_description ~= (task.description or "") then
+      updates.description = new_description
+    end
+
+    if not next(updates) then return end  -- nothing changed
+    update_task_field(task.id, updates, state_obj)
+  end
+
+  vim.keymap.set({ 'n', 'i' }, '<leader>w', save_and_close,
+    { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', 'q',     function() pcall(vim.api.nvim_win_close, win, true) end,
+    { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<Esc>', function() pcall(vim.api.nvim_win_close, win, true) end,
+    { buffer = buf, noremap = true, silent = true })
+end
+
 local function handle_action(state_obj, action_type)
   if not state_obj or not vim.api.nvim_win_is_valid(state_obj.win) then return end
 
@@ -639,28 +735,7 @@ local function handle_action(state_obj, action_type)
     end)
 
   elseif action_type == "edit" then
-    vim.ui.select({ "Content", "Due date", "Priority", "Cancel" }, { prompt = "Edit what?" },
-      function(choice)
-        if choice == "Content" then
-          vim.ui.input({ prompt = "New content: ", default = task.content }, function(content)
-            if not content or content == "" then return end
-            update_task_field(task.id, { content = content }, state_obj)
-          end)
-        elseif choice == "Due date" then
-          local default = (task.due and type(task.due) == "table" and (task.due.string or task.due.date)) or ""
-          vim.ui.input({ prompt = "Due (e.g. 'tomorrow', '2024-12-31'): ", default = default }, function(due)
-            if not due then return end
-            update_task_field(task.id, { due_string = due }, state_obj)
-          end)
-        elseif choice == "Priority" then
-          vim.ui.select({ "1 (Normal)", "2 (Medium)", "3 (High)", "4 (Urgent)" }, { prompt = "Priority:" },
-            function(choice_str)
-              if not choice_str then return end
-              local priority = tonumber(choice_str:match("^(%d)"))
-              if priority then update_task_field(task.id, { priority = priority }, state_obj) end
-            end)
-        end
-      end)
+    open_edit_window(task, state_obj)
 
   elseif action_type == "delete" then
     vim.ui.select({ "Yes, delete", "Cancel" },
@@ -695,11 +770,11 @@ end
 function setup_actions(state_obj)
   local buf = state_obj.buf
 
-  vim.keymap.set('n', '<CR>',  function() handle_action(state_obj, "complete") end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<C-e>', function() handle_action(state_obj, "edit")     end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<C-x>', function() handle_action(state_obj, "delete")   end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<C-r>', function() refresh_with_loader(state_obj)        end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '/',     function() enter_search_mode(state_obj)          end, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<CR>',        function() handle_action(state_obj, "complete") end, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "delete")   end, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<leader>tr', function() refresh_with_loader(state_obj)        end, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '/',          function() enter_search_mode(state_obj)          end, { buffer = buf, noremap = true, silent = true })
 end
 
 -- Main entry point
