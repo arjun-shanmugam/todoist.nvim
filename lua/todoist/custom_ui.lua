@@ -617,10 +617,15 @@ end
 local function open_edit_window(task, state_obj)
   local total_w = vim.o.columns
   local total_h = vim.o.lines
-  local width   = math.floor(total_w * 0.55)
-  local height  = math.floor(total_h * 0.45)
+  local width   = math.floor(total_w * 0.60)
+  local height  = math.floor(total_h * 0.55)
   local row     = math.floor((total_h - height) / 2)
   local col     = math.floor((total_w - width) / 2)
+
+  -- Edit window highlight groups
+  vim.api.nvim_set_hl(0, "TodoistEditTitle", { fg = "#f8f8f2", bold = true })
+  vim.api.nvim_set_hl(0, "TodoistEditSep",   { fg = "#44475a" })
+  vim.api.nvim_set_hl(0, "TodoistEditLabel", { fg = "#6272a4", italic = true })
 
   local buf = vim.api.nvim_create_buf(false, true)
   pcall(function()
@@ -630,10 +635,11 @@ local function open_edit_window(task, state_obj)
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
   end)
 
-  -- Line 1: title, line 2: blank separator, lines 3+: description
-  local initial = { task.content or "" , "" }
-  if task.description and task.description ~= "" then
-    for line in (task.description .. "\n"):gmatch("([^\n]*)\n") do
+  -- Layout: line 1 = title, lines 2+ = description (no blank separator)
+  local desc_text = (task.description or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  local initial = { task.content or "" }
+  if desc_text ~= "" then
+    for line in (desc_text .. "\n"):gmatch("([^\n]*)\n") do
       table.insert(initial, line)
     end
   else
@@ -641,13 +647,26 @@ local function open_edit_window(task, state_obj)
   end
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial)
 
-  -- Right-aligned virtual text labels so the user knows what each section is
   local ns = vim.api.nvim_create_namespace("todoist_edit_ui")
+
+  -- Highlight entire title line
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    virt_text = { { "title", "Comment" } }, virt_text_pos = "right_align",
+    line_hl_group = "TodoistEditTitle",
   })
-  vim.api.nvim_buf_set_extmark(buf, ns, 2, 0, {
-    virt_text = { { "description", "Comment" } }, virt_text_pos = "right_align",
+  -- "Title" label right-aligned on line 1
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    virt_text     = { { "  Title  ", "TodoistEditLabel" } },
+    virt_text_pos = "right_align",
+    priority      = 100,
+  })
+  -- Visual separator + Description label between title and description (virtual lines, not real)
+  local sep_text = string.rep("─", width - 2)
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
+    virt_lines = {
+      { { sep_text,          "TodoistEditSep"   } },
+      { { "  Description",   "TodoistEditLabel" } },
+    },
+    virt_lines_above = false,
   })
 
   local win_opts = {
@@ -656,17 +675,17 @@ local function open_edit_window(task, state_obj)
     style     = "minimal", border = "rounded",
     title     = " Edit Task ", title_pos = "center",
   }
-  -- footer requires nvim 0.10+; ignore silently on older versions
   pcall(function()
-    win_opts.footer     = "  <leader>w  save    q  cancel  "
+    win_opts.footer     = "  <leader>w  save    q  discard  "
     win_opts.footer_pos = "center"
   end)
 
   local win = vim.api.nvim_open_win(buf, true, win_opts)
   pcall(vim.api.nvim_win_set_option, win, 'wrap', true)
   pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
+  pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
 
-  -- Position cursor at end of title line and enter insert mode
+  -- Cursor at end of title, enter insert mode
   vim.api.nvim_win_set_cursor(win, { 1, #initial[1] })
   vim.cmd("startinsert!")
 
@@ -678,10 +697,9 @@ local function open_edit_window(task, state_obj)
       return
     end
 
-    -- Everything from line 3 onwards is the description
+    -- Description = lines 2+ (no blank separator line to skip)
     local desc_parts = {}
-    for i = 3, #lines do table.insert(desc_parts, lines[i]) end
-    -- Trim trailing blank lines
+    for i = 2, #lines do table.insert(desc_parts, lines[i]) end
     while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
       table.remove(desc_parts)
     end
@@ -697,16 +715,17 @@ local function open_edit_window(task, state_obj)
       updates.description = new_description
     end
 
-    if not next(updates) then return end  -- nothing changed
+    if not next(updates) then return end
     update_task_field(task.id, updates, state_obj)
   end
 
-  vim.keymap.set({ 'n', 'i' }, '<leader>w', save_and_close,
+  -- Normal mode only — no insert-mode <leader>w to prevent accidental save while typing
+  vim.keymap.set('n', '<leader>w', save_and_close,
     { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', 'q',     function() pcall(vim.api.nvim_win_close, win, true) end,
-    { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<Esc>', function() pcall(vim.api.nvim_win_close, win, true) end,
-    { buffer = buf, noremap = true, silent = true })
+  -- q closes without saving; <Esc> is intentionally NOT mapped so it just exits insert mode
+  vim.keymap.set('n', 'q', function()
+    pcall(vim.api.nvim_win_close, win, true)
+  end, { buffer = buf, noremap = true, silent = true })
 end
 
 local function handle_action(state_obj, action_type)
