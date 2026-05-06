@@ -644,6 +644,7 @@ local function open_create_window(state_obj)
   vim.api.nvim_set_hl(0, "TodoistEditSep",         { fg = "#44475a" })
   vim.api.nvim_set_hl(0, "TodoistEditLabel",       { fg = "#6272a4", italic = true })
   vim.api.nvim_set_hl(0, "TodoistEditProjectName", {})
+  vim.api.nvim_set_hl(0, "TodoistEditDue",         { fg = "#ff79c6" })
 
   local cfg = require("todoist.config").get()
   local selected_project = { id = nil, name = "Inbox" }
@@ -662,17 +663,16 @@ local function open_create_window(state_obj)
 
   -- Layout: line 0 = "  Project" (header, ignored on save)
   --         line 1 = title
-  --         lines 2+ = description
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "  Project", "", "" })
+  --         line 2 = due date (free text, e.g. "today", "tomorrow", "2025-12-31")
+  --         lines 3+ = description
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "  Project", "", "", "" })
 
   local ns     = vim.api.nvim_create_namespace("todoist_create_ui")
   local sep    = string.rep("─", width - 2)
   local hdr_id = nil
 
-  -- Highlight the Project header line (muted, non-editable look)
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditLabel" })
 
-  -- Project name + separators rendered below line 0 (virt_lines_above=false: between line 0 and line 1)
   local function render_header()
     local opts = {
       virt_lines = {
@@ -688,9 +688,15 @@ local function open_create_window(state_obj)
 
   render_header()
 
-  -- Title line highlight + Description section below it
+  -- Title line + Due Date section below it
   vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, { line_hl_group = "TodoistEditTitle" })
   vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, {
+    virt_lines       = { { { sep, "TodoistEditSep" } }, { { "  Due Date", "TodoistEditLabel" } } },
+    virt_lines_above = false,
+  })
+  -- Due date line + Description section below it
+  vim.api.nvim_buf_set_extmark(buf, ns, 2, 0, { line_hl_group = "TodoistEditDue" })
+  vim.api.nvim_buf_set_extmark(buf, ns, 2, 0, {
     virt_lines       = { { { sep, "TodoistEditSep" } }, { { "  Description", "TodoistEditLabel" } } },
     virt_lines_above = false,
   })
@@ -709,19 +715,19 @@ local function open_create_window(state_obj)
   pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
   pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
 
-  -- Start cursor on the title line (line 2 in 1-indexed)
   vim.api.nvim_win_set_cursor(win, { 2, 0 })
   vim.cmd("startinsert!")
 
   local function save_and_close()
     local lines       = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local new_content = vim.trim(lines[2] or "")  -- line 1 (0-idx) = title
+    local new_content = vim.trim(lines[2] or "")
     if new_content == "" then
       vim.notify("Task title cannot be empty", vim.log.levels.WARN)
       return
     end
+    local new_due = vim.trim(lines[3] or "")
     local desc_parts = {}
-    for i = 3, #lines do table.insert(desc_parts, lines[i]) end
+    for i = 4, #lines do table.insert(desc_parts, lines[i]) end
     while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
       table.remove(desc_parts)
     end
@@ -731,7 +737,8 @@ local function open_create_window(state_obj)
     local token = require("todoist.auth").load_token()
     if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
 
-    local payload = { content = new_content, due_string = "today" }
+    local payload = { content = new_content }
+    if new_due ~= "" then payload.due_string = new_due end
     if new_description ~= "" then payload.description = new_description end
     if selected_project.id then payload.project_id = selected_project.id end
 
@@ -774,9 +781,18 @@ local function open_edit_window(task, state_obj)
   vim.api.nvim_set_hl(0, "TodoistEditSep",         { fg = "#44475a" })
   vim.api.nvim_set_hl(0, "TodoistEditLabel",       { fg = "#6272a4", italic = true })
   vim.api.nvim_set_hl(0, "TodoistEditProjectName", {})
+  vim.api.nvim_set_hl(0, "TodoistEditDue",         { fg = "#ff79c6" })
+
+  local selected_project = { id = task.project_id, name = "Inbox" }
   if task.project_id and state_obj.project_lookup then
     local p = state_obj.project_lookup[tostring(task.project_id)]
     if p then selected_project = { id = task.project_id, name = p.name } end
+  end
+
+  -- Resolve current due date string for display
+  local original_due = ""
+  if task.due and type(task.due) == "table" then
+    original_due = task.due.string or task.due.date or ""
   end
 
   local buf = vim.api.nvim_create_buf(false, true)
@@ -789,9 +805,10 @@ local function open_edit_window(task, state_obj)
 
   -- Layout: line 0 = "  Project" (header, ignored on save)
   --         line 1 = title
-  --         lines 2+ = description
+  --         line 2 = due date
+  --         lines 3+ = description
   local desc_text = (task.description or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-  local initial   = { "  Project", task.content or "" }
+  local initial   = { "  Project", task.content or "", original_due }
   if desc_text ~= "" then
     for line in (desc_text .. "\n"):gmatch("([^\n]*)\n") do
       table.insert(initial, line)
@@ -822,8 +839,15 @@ local function open_edit_window(task, state_obj)
 
   render_header()
 
+  -- Title line + Due Date section below it
   vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, { line_hl_group = "TodoistEditTitle" })
   vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, {
+    virt_lines       = { { { sep, "TodoistEditSep" } }, { { "  Due Date", "TodoistEditLabel" } } },
+    virt_lines_above = false,
+  })
+  -- Due date line + Description section below it
+  vim.api.nvim_buf_set_extmark(buf, ns, 2, 0, { line_hl_group = "TodoistEditDue" })
+  vim.api.nvim_buf_set_extmark(buf, ns, 2, 0, {
     virt_lines       = { { { sep, "TodoistEditSep" } }, { { "  Description", "TodoistEditLabel" } } },
     virt_lines_above = false,
   })
@@ -842,19 +866,19 @@ local function open_edit_window(task, state_obj)
   pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
   pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
 
-  -- Cursor at end of title (line 2, 1-indexed), enter insert mode
   vim.api.nvim_win_set_cursor(win, { 2, #(task.content or "") })
   vim.cmd("startinsert!")
 
   local function save_and_close()
     local lines       = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    local new_content = vim.trim(lines[2] or "")  -- line index 1 (0-based) = title
+    local new_content = vim.trim(lines[2] or "")
     if new_content == "" then
       vim.notify("Task title cannot be empty", vim.log.levels.WARN)
       return
     end
+    local new_due = vim.trim(lines[3] or "")
     local desc_parts = {}
-    for i = 3, #lines do table.insert(desc_parts, lines[i]) end
+    for i = 4, #lines do table.insert(desc_parts, lines[i]) end
     while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
       table.remove(desc_parts)
     end
@@ -864,8 +888,10 @@ local function open_edit_window(task, state_obj)
     local updates = {}
     if new_content ~= (task.content or "") then updates.content = new_content end
     if new_description ~= (task.description or "") then updates.description = new_description end
+    if new_due ~= original_due then
+      updates.due_string = new_due ~= "" and new_due or vim.NIL
+    end
 
-    -- project_id uses a separate /move endpoint; track change separately
     local new_project_id = nil
     if tostring(selected_project.id or "") ~= tostring(task.project_id or "") then
       new_project_id = selected_project.id
