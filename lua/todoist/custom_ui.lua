@@ -675,7 +675,7 @@ local function open_edit_window(task, state_obj)
     title     = " Edit Task ", title_pos = "center",
   }
   pcall(function()
-    win_opts.footer     = "  <leader>w  save    <Esc>/<q>  close  "
+    win_opts.footer     = "  <leader>tw  save    <leader>tq/<Esc>  close  "
     win_opts.footer_pos = "center"
   end)
 
@@ -720,11 +720,11 @@ local function open_edit_window(task, state_obj)
 
   -- Normal mode only — no insert-mode <leader>w to prevent accidental save while typing.
   -- <Esc> from insert mode → normal mode; <Esc> again (or q) → close without saving.
-  vim.keymap.set('n', '<leader>w', save_and_close,
+  vim.keymap.set('n', '<leader>tw', save_and_close,
     { buffer = buf, noremap = true, silent = true })
   local function close_window() pcall(vim.api.nvim_win_close, win, true) end
-  vim.keymap.set('n', 'q',     close_window, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<Esc>', close_window, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<leader>tq', close_window, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<Esc>',      close_window, { buffer = buf, noremap = true, silent = true })
 end
 
 local function handle_action(state_obj, action_type)
