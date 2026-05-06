@@ -862,14 +862,15 @@ local function open_edit_window(task, state_obj)
     local updates = {}
     if new_content ~= (task.content or "") then updates.content = new_content end
     if new_description ~= (task.description or "") then updates.description = new_description end
-    -- Compare as strings: task.project_id arrives from JSON as a number, selected_project.id is a string
+
+    -- project_id uses a separate /move endpoint; track change separately
+    local new_project_id = nil
     if tostring(selected_project.id or "") ~= tostring(task.project_id or "") then
-      -- Send as the same type the API originally returned (number if parseable)
-      updates.project_id = tonumber(selected_project.id) or selected_project.id
+      new_project_id = selected_project.id
     end
 
-    if not next(updates) then return end
-    update_task_field(task.id, updates, state_obj)
+    if not next(updates) and not new_project_id then return end
+    update_task_field(task.id, updates, new_project_id, state_obj)
   end
 
   local function pick_project()
@@ -937,16 +938,33 @@ local function handle_action(state_obj, action_type)
   end
 end
 
-function update_task_field(task_id, updates, state_obj)
+function update_task_field(task_id, updates, new_project_id, state_obj)
   local auth   = require("todoist.auth")
   local client = require("todoist.client")
   local token  = auth.load_token()
   if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
-  client.update_task(token, task_id, updates, function(err)
-    if err then vim.notify("Update failed: " .. err, vim.log.levels.ERROR); return end
-    vim.notify("Task updated", vim.log.levels.INFO)
-    refresh_with_loader(state_obj)
-  end)
+
+  local function do_move_then_refresh()
+    if new_project_id then
+      client.move_task(token, task_id, new_project_id, function(err)
+        if err then vim.notify("Move failed: " .. err, vim.log.levels.ERROR); return end
+        vim.notify("Task updated", vim.log.levels.INFO)
+        refresh_with_loader(state_obj)
+      end)
+    else
+      vim.notify("Task updated", vim.log.levels.INFO)
+      refresh_with_loader(state_obj)
+    end
+  end
+
+  if next(updates) then
+    client.update_task(token, task_id, updates, function(err)
+      if err then vim.notify("Update failed: " .. err, vim.log.levels.ERROR); return end
+      do_move_then_refresh()
+    end)
+  else
+    do_move_then_refresh()
+  end
 end
 
 function setup_actions(state_obj)

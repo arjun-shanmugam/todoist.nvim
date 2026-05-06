@@ -155,6 +155,15 @@ function M.update_task(token, task_id, updates, cb)
   }, cb)
 end
 
+function M.move_task(token, task_id, project_id, cb)
+  request({
+    method = "POST",
+    path = string.format("/tasks/%s/move", task_id),
+    token = token,
+    body = { project_id = project_id },
+  }, cb)
+end
+
 function M.delete_task(token, task_id, cb)
   request({
     method = "DELETE",
