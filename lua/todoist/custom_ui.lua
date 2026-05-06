@@ -411,15 +411,16 @@ end
 
 local function setup_navigation(state_obj)
   local buf = state_obj.buf
+  local o   = { buffer = buf, noremap = true, silent = true }
 
-  vim.keymap.set('n', 'j',      function() move_cursor(state_obj,  1)          end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', 'k',      function() move_cursor(state_obj, -1)          end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<Down>', function() move_cursor(state_obj,  1)          end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<Up>',   function() move_cursor(state_obj, -1)          end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', 'gg',     function() move_cursor(state_obj, -math.huge)  end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', 'G',      function() move_cursor(state_obj,  math.huge)  end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<C-d>',  function() move_cursor(state_obj,  10)         end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<C-u>',  function() move_cursor(state_obj, -10)         end, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', 'j',      function() move_cursor(state_obj,  1)         end, vim.tbl_extend("force", o, { desc = "Next task"      }))
+  vim.keymap.set('n', 'k',      function() move_cursor(state_obj, -1)         end, vim.tbl_extend("force", o, { desc = "Prev task"      }))
+  vim.keymap.set('n', '<Down>', function() move_cursor(state_obj,  1)         end, vim.tbl_extend("force", o, { desc = "Next task"      }))
+  vim.keymap.set('n', '<Up>',   function() move_cursor(state_obj, -1)         end, vim.tbl_extend("force", o, { desc = "Prev task"      }))
+  vim.keymap.set('n', 'gg',     function() move_cursor(state_obj, -math.huge) end, vim.tbl_extend("force", o, { desc = "First task"     }))
+  vim.keymap.set('n', 'G',      function() move_cursor(state_obj,  math.huge) end, vim.tbl_extend("force", o, { desc = "Last task"      }))
+  vim.keymap.set('n', '<C-d>',  function() move_cursor(state_obj,  10)        end, vim.tbl_extend("force", o, { desc = "Scroll down"    }))
+  vim.keymap.set('n', '<C-u>',  function() move_cursor(state_obj, -10)        end, vim.tbl_extend("force", o, { desc = "Scroll up"      }))
 end
 
 local function fuzzy_match(query, text)
@@ -616,6 +617,20 @@ local function setup_autocmds(state_obj)
   })
 end
 
+-- Shared helper: sorted list of {id, name} from project_lookup for vim.ui.select
+local function project_choices(project_lookup)
+  local choices = {}
+  if project_lookup then
+    for pid, p in pairs(project_lookup) do
+      if pid ~= "inbox" then
+        table.insert(choices, { id = pid, name = p.name or pid })
+      end
+    end
+  end
+  table.sort(choices, function(a, b) return (a.name):lower() < (b.name):lower() end)
+  return choices
+end
+
 -- Floating window to create a new task (same UI as edit, but blank)
 local function open_create_window(state_obj)
   local total_w = vim.o.columns
@@ -625,9 +640,17 @@ local function open_create_window(state_obj)
   local row     = math.floor((total_h - height) / 2)
   local col     = math.floor((total_w - width) / 2)
 
-  vim.api.nvim_set_hl(0, "TodoistEditTitle", { bold = true })
-  vim.api.nvim_set_hl(0, "TodoistEditSep",   { fg = "#44475a" })
-  vim.api.nvim_set_hl(0, "TodoistEditLabel", { fg = "#6272a4", italic = true })
+  vim.api.nvim_set_hl(0, "TodoistEditTitle",       { bold = true })
+  vim.api.nvim_set_hl(0, "TodoistEditSep",         { fg = "#44475a" })
+  vim.api.nvim_set_hl(0, "TodoistEditLabel",       { fg = "#6272a4", italic = true })
+  vim.api.nvim_set_hl(0, "TodoistEditProjectName", { fg = "#f8f8f2" })
+
+  local cfg = require("todoist.config").get()
+  local selected_project = { id = nil, name = "Inbox" }
+  if cfg.default_project and state_obj.project_lookup then
+    local p = state_obj.project_lookup[tostring(cfg.default_project)]
+    if p then selected_project = { id = cfg.default_project, name = p.name } end
+  end
 
   local buf = vim.api.nvim_create_buf(false, true)
   pcall(function()
@@ -639,32 +662,37 @@ local function open_create_window(state_obj)
 
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "" })
 
-  local ns = vim.api.nvim_create_namespace("todoist_create_ui")
+  local ns     = vim.api.nvim_create_namespace("todoist_create_ui")
+  local sep    = string.rep("─", width - 2)
+  local hdr_id = nil
 
+  local function render_header()
+    local opts = {
+      virt_lines = {
+        { { "  Project",                    "TodoistEditLabel"       } },
+        { { "  " .. selected_project.name, "TodoistEditProjectName" } },
+        { { sep,                            "TodoistEditSep"         } },
+        { { "  Title",                      "TodoistEditLabel"       } },
+      },
+      virt_lines_above = true,
+    }
+    if hdr_id then opts.id = hdr_id end
+    hdr_id = vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, opts)
+  end
+
+  render_header()
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditTitle" })
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    virt_lines       = { { { "  Title", "TodoistEditLabel" } } },
-    virt_lines_above = true,
-  })
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    line_hl_group = "TodoistEditTitle",
-  })
-  local sep_text = string.rep("─", width - 2)
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    virt_lines = {
-      { { sep_text,        "TodoistEditSep"   } },
-      { { "  Description", "TodoistEditLabel" } },
-    },
+    virt_lines       = { { { sep, "TodoistEditSep" } }, { { "  Description", "TodoistEditLabel" } } },
     virt_lines_above = false,
   })
 
   local win_opts = {
-    relative  = "editor",
-    width     = width, height = height, row = row, col = col,
-    style     = "minimal", border = "rounded",
-    title     = " New Task ", title_pos = "center",
+    relative  = "editor", width = width, height = height, row = row, col = col,
+    style     = "minimal", border = "rounded", title = " New Task ", title_pos = "center",
   }
   pcall(function()
-    win_opts.footer     = "  <leader>tw  save    <leader>tq/<Esc>  close  "
+    win_opts.footer     = "  <leader>tw save  ·  <leader>tp project  ·  <leader>tq close  "
     win_opts.footer_pos = "center"
   end)
 
@@ -683,39 +711,45 @@ local function open_create_window(state_obj)
       vim.notify("Task title cannot be empty", vim.log.levels.WARN)
       return
     end
-
     local desc_parts = {}
     for i = 2, #lines do table.insert(desc_parts, lines[i]) end
     while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
       table.remove(desc_parts)
     end
     local new_description = table.concat(desc_parts, "\n")
-
     pcall(vim.api.nvim_win_close, win, true)
 
-    local auth_mod = require("todoist.auth")
-    local token    = auth_mod.load_token()
+    local token = require("todoist.auth").load_token()
     if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
 
     local payload = { content = new_content, due_string = "today" }
     if new_description ~= "" then payload.description = new_description end
+    if selected_project.id then payload.project_id = selected_project.id end
 
-    local cfg = require("todoist.config").get()
-    if cfg.default_project then payload.project_id = cfg.default_project end
-
-    local client_mod = require("todoist.client")
-    client_mod.add_task(token, payload, function(err, task)
+    require("todoist.client").add_task(token, payload, function(err, task)
       if err then vim.notify("Failed to create task: " .. err, vim.log.levels.ERROR); return end
       vim.notify(string.format("Created: %s", task and task.content or new_content))
       refresh_with_loader(state_obj)
     end)
   end
 
-  vim.keymap.set('n', '<leader>tw', save_and_close,
-    { buffer = buf, noremap = true, silent = true })
-  local function close_window() pcall(vim.api.nvim_win_close, win, true) end
-  vim.keymap.set('n', '<leader>tq', close_window, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<Esc>',      close_window, { buffer = buf, noremap = true, silent = true })
+  local function pick_project()
+    local choices = project_choices(state_obj.project_lookup)
+    local names   = vim.tbl_map(function(c) return c.name end, choices)
+    vim.ui.select(names, { prompt = "Select project: " }, function(choice)
+      if not choice then return end
+      for _, c in ipairs(choices) do
+        if c.name == choice then selected_project = c; render_header(); return end
+      end
+    end)
+  end
+
+  local o = { buffer = buf, noremap = true, silent = true }
+  vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save new task"  }))
+  vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project" }))
+  local function close() pcall(vim.api.nvim_win_close, win, true) end
+  vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
+  vim.keymap.set('n', '<Esc>',      close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
 end
 
 -- Floating editor for task title + description
@@ -727,10 +761,17 @@ local function open_edit_window(task, state_obj)
   local row     = math.floor((total_h - height) / 2)
   local col     = math.floor((total_w - width) / 2)
 
-  -- Edit window highlight groups
-  vim.api.nvim_set_hl(0, "TodoistEditTitle", { bold = true })
-  vim.api.nvim_set_hl(0, "TodoistEditSep",   { fg = "#44475a" })
-  vim.api.nvim_set_hl(0, "TodoistEditLabel", { fg = "#6272a4", italic = true })
+  vim.api.nvim_set_hl(0, "TodoistEditTitle",       { bold = true })
+  vim.api.nvim_set_hl(0, "TodoistEditSep",         { fg = "#44475a" })
+  vim.api.nvim_set_hl(0, "TodoistEditLabel",       { fg = "#6272a4", italic = true })
+  vim.api.nvim_set_hl(0, "TodoistEditProjectName", { fg = "#f8f8f2" })
+
+  -- Resolve current project for this task
+  local selected_project = { id = task.project_id, name = "Inbox" }
+  if task.project_id and state_obj.project_lookup then
+    local p = state_obj.project_lookup[tostring(task.project_id)]
+    if p then selected_project = { id = task.project_id, name = p.name } end
+  end
 
   local buf = vim.api.nvim_create_buf(false, true)
   pcall(function()
@@ -740,7 +781,6 @@ local function open_edit_window(task, state_obj)
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
   end)
 
-  -- Layout: line 1 = title, lines 2+ = description (no blank separator)
   local desc_text = (task.description or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
   local initial = { task.content or "" }
   if desc_text ~= "" then
@@ -752,35 +792,37 @@ local function open_edit_window(task, state_obj)
   end
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, initial)
 
-  local ns = vim.api.nvim_create_namespace("todoist_edit_ui")
+  local ns     = vim.api.nvim_create_namespace("todoist_edit_ui")
+  local sep    = string.rep("─", width - 2)
+  local hdr_id = nil
 
-  -- "Title" label above line 1, left-justified
+  local function render_header()
+    local opts = {
+      virt_lines = {
+        { { "  Project",                    "TodoistEditLabel"       } },
+        { { "  " .. selected_project.name, "TodoistEditProjectName" } },
+        { { sep,                            "TodoistEditSep"         } },
+        { { "  Title",                      "TodoistEditLabel"       } },
+      },
+      virt_lines_above = true,
+    }
+    if hdr_id then opts.id = hdr_id end
+    hdr_id = vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, opts)
+  end
+
+  render_header()
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditTitle" })
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    virt_lines       = { { { "  Title", "TodoistEditLabel" } } },
-    virt_lines_above = true,
-  })
-  -- Highlight entire title line
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    line_hl_group = "TodoistEditTitle",
-  })
-  -- Separator + "Description" label above the description section, left-justified
-  local sep_text = string.rep("─", width - 2)
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    virt_lines = {
-      { { sep_text,        "TodoistEditSep"   } },
-      { { "  Description", "TodoistEditLabel" } },
-    },
+    virt_lines       = { { { sep, "TodoistEditSep" } }, { { "  Description", "TodoistEditLabel" } } },
     virt_lines_above = false,
   })
 
   local win_opts = {
-    relative  = "editor",
-    width     = width, height = height, row = row, col = col,
-    style     = "minimal", border = "rounded",
-    title     = " Edit Task ", title_pos = "center",
+    relative  = "editor", width = width, height = height, row = row, col = col,
+    style     = "minimal", border = "rounded", title = " Edit Task ", title_pos = "center",
   }
   pcall(function()
-    win_opts.footer     = "  <leader>tw  save    <leader>tq/<Esc>  close  "
+    win_opts.footer     = "  <leader>tw save  ·  <leader>tp project  ·  <leader>tq close  "
     win_opts.footer_pos = "center"
   end)
 
@@ -789,7 +831,6 @@ local function open_edit_window(task, state_obj)
   pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
   pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
 
-  -- Cursor at end of title, enter insert mode
   vim.api.nvim_win_set_cursor(win, { 1, #initial[1] })
   vim.cmd("startinsert!")
 
@@ -800,36 +841,40 @@ local function open_edit_window(task, state_obj)
       vim.notify("Task title cannot be empty", vim.log.levels.WARN)
       return
     end
-
-    -- Description = lines 2+ (no blank separator line to skip)
     local desc_parts = {}
     for i = 2, #lines do table.insert(desc_parts, lines[i]) end
     while #desc_parts > 0 and vim.trim(desc_parts[#desc_parts]) == "" do
       table.remove(desc_parts)
     end
     local new_description = table.concat(desc_parts, "\n")
-
     pcall(vim.api.nvim_win_close, win, true)
 
     local updates = {}
-    if new_content ~= (task.content or "") then
-      updates.content = new_content
-    end
-    if new_description ~= (task.description or "") then
-      updates.description = new_description
-    end
+    if new_content ~= (task.content or "") then updates.content = new_content end
+    if new_description ~= (task.description or "") then updates.description = new_description end
+    if selected_project.id ~= task.project_id then updates.project_id = selected_project.id end
 
     if not next(updates) then return end
     update_task_field(task.id, updates, state_obj)
   end
 
-  -- Normal mode only — no insert-mode <leader>w to prevent accidental save while typing.
-  -- <Esc> from insert mode → normal mode; <Esc> again (or q) → close without saving.
-  vim.keymap.set('n', '<leader>tw', save_and_close,
-    { buffer = buf, noremap = true, silent = true })
-  local function close_window() pcall(vim.api.nvim_win_close, win, true) end
-  vim.keymap.set('n', '<leader>tq', close_window, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<Esc>',      close_window, { buffer = buf, noremap = true, silent = true })
+  local function pick_project()
+    local choices = project_choices(state_obj.project_lookup)
+    local names   = vim.tbl_map(function(c) return c.name end, choices)
+    vim.ui.select(names, { prompt = "Select project: " }, function(choice)
+      if not choice then return end
+      for _, c in ipairs(choices) do
+        if c.name == choice then selected_project = c; render_header(); return end
+      end
+    end)
+  end
+
+  local o = { buffer = buf, noremap = true, silent = true }
+  vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save task"      }))
+  vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project" }))
+  local function close() pcall(vim.api.nvim_win_close, win, true) end
+  vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
+  vim.keymap.set('n', '<Esc>',      close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
 end
 
 local function handle_action(state_obj, action_type)
@@ -892,13 +937,14 @@ end
 
 function setup_actions(state_obj)
   local buf = state_obj.buf
+  local o   = { buffer = buf, noremap = true, silent = true }
 
-  vim.keymap.set('n', '<CR>',        function() handle_action(state_obj, "complete") end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "delete")   end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<leader>tr', function() refresh_with_loader(state_obj)        end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<leader>tn', function() open_create_window(state_obj)         end, { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '/',          function() enter_search_mode(state_obj)          end, { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<CR>',        function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: complete task"  }))
+  vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, vim.tbl_extend("force", o, { desc = "Todoist: edit task"      }))
+  vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "delete")   end, vim.tbl_extend("force", o, { desc = "Todoist: delete task"    }))
+  vim.keymap.set('n', '<leader>tr', function() refresh_with_loader(state_obj)        end, vim.tbl_extend("force", o, { desc = "Todoist: refresh"        }))
+  vim.keymap.set('n', '<leader>tn', function() open_create_window(state_obj)         end, vim.tbl_extend("force", o, { desc = "Todoist: new task"       }))
+  vim.keymap.set('n', '/',          function() enter_search_mode(state_obj)          end, vim.tbl_extend("force", o, { desc = "Todoist: search tasks"   }))
 end
 
 -- Main entry point
@@ -956,7 +1002,7 @@ function M.show_today(tasks, opts)
     else
       vim.notify("ClaudeCode not available", vim.log.levels.WARN)
     end
-  end, { buffer = layout.buf, noremap = true, silent = true })
+  end, { buffer = layout.buf, noremap = true, silent = true, desc = "Todoist: send to Claude" })
 
   -- Close
   vim.keymap.set('n', 'q', function()
@@ -966,7 +1012,7 @@ function M.show_today(tasks, opts)
     if vim.api.nvim_win_is_valid(state.win) then
       pcall(vim.api.nvim_win_close, state.win, true)
     end
-  end, { buffer = layout.buf, noremap = true, silent = true })
+  end, { buffer = layout.buf, noremap = true, silent = true, desc = "Todoist: close" })
 
   vim.schedule(function()
     move_cursor(state, 0)
