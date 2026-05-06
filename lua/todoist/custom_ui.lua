@@ -154,7 +154,8 @@ local function create_window()
     vim.api.nvim_win_set_option(win, 'number', false)
     vim.api.nvim_win_set_option(win, 'relativenumber', false)
     vim.api.nvim_win_set_option(win, 'cursorline', true)
-    vim.api.nvim_win_set_option(win, 'wrap', false)
+    vim.api.nvim_win_set_option(win, 'wrap', true)
+    vim.api.nvim_win_set_option(win, 'linebreak', true)
   end)
 
   return { buf = buf, win = win }
