@@ -235,7 +235,8 @@ local function group_tasks_by_project(tasks, project_lookup)
 end
 
 -- Recursively render a task tree into lines/line_map
-local function render_tree(nodes, depth, lines, line_map, line_num, task_map)
+-- expanded_tasks: set (table keyed by task id string) of tasks whose descriptions are visible
+local function render_tree(nodes, depth, lines, line_map, line_num, task_map, expanded_tasks)
   for _, task in ipairs(nodes) do
     -- Task line
     local line = format_task_entry(task, depth)
@@ -246,8 +247,10 @@ local function render_tree(nodes, depth, lines, line_map, line_num, task_map)
     end
     line_num = line_num + 1
 
-    -- Inline description (non-empty, non-blank lines only)
-    if task.description and task.description ~= "" then
+    -- Inline description — only when task is expanded
+    if task.description and task.description ~= ""
+      and expanded_tasks and expanded_tasks[tostring(task.id)]
+    then
       local base_indent = string.rep("  ", (depth or 0) + 2)
       local first_line = true
       for desc_line in (task.description .. "\n"):gmatch("([^\n]*)\n") do
@@ -263,7 +266,7 @@ local function render_tree(nodes, depth, lines, line_map, line_num, task_map)
 
     -- Children (indented one level deeper)
     if task.children and #task.children > 0 then
-      line_num = render_tree(task.children, depth + 1, lines, line_map, line_num, task_map)
+      line_num = render_tree(task.children, depth + 1, lines, line_map, line_num, task_map, expanded_tasks)
     end
   end
   return line_num
@@ -280,7 +283,7 @@ local function count_tasks(nodes)
 end
 
 -- Render all tasks into buf; returns line_map, task_map, lines
-local function render_grouped_tasks(buf, tasks, project_lookup)
+local function render_grouped_tasks(buf, tasks, project_lookup, expanded_tasks)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then
     return {}, {}, {}
   end
@@ -317,7 +320,7 @@ local function render_grouped_tasks(buf, tasks, project_lookup)
       end
 
       -- Then active tasks (with hierarchy)
-      line_num = render_tree(group.roots, 0, lines, line_map, line_num, task_map)
+      line_num = render_tree(group.roots, 0, lines, line_map, line_num, task_map, expanded_tasks)
 
       table.insert(lines, "")
       line_map[line_num] = { type = "separator" }
@@ -477,7 +480,7 @@ local function refresh_ui(state_obj)
 
   local tasks_to_display = state_obj.search_mode and state_obj.filtered_tasks or state_obj.tasks
 
-  local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, tasks_to_display, state_obj.project_lookup)
+  local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, tasks_to_display, state_obj.project_lookup, state_obj.expanded_tasks)
   state_obj.line_map = line_map
   state_obj.task_map = task_map
 
@@ -1114,9 +1117,22 @@ function setup_actions(state_obj)
   local buf = state_obj.buf
   local o   = { buffer = buf, noremap = true, silent = true }
 
-  vim.keymap.set('n', '<CR>',        function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: complete task"         }))
+  vim.keymap.set('n', '<CR>', function()
+    local cursor    = vim.api.nvim_win_get_cursor(state_obj.win)
+    local line_info = state_obj.line_map[cursor[1]]
+    if not line_info or line_info.type ~= "task" then return end
+    local task = line_info.task
+    if not task.description or task.description == "" then return end
+    local id = tostring(task.id)
+    if state_obj.expanded_tasks[id] then
+      state_obj.expanded_tasks[id] = nil
+    else
+      state_obj.expanded_tasks[id] = true
+    end
+    refresh_ui(state_obj)
+  end, vim.tbl_extend("force", o, { desc = "Todoist: toggle description"    }))
   vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, vim.tbl_extend("force", o, { desc = "Todoist: edit task"              }))
-  vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: complete task"         }))
+  vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: toggle complete"        }))
   vim.keymap.set('n', '<leader>td', function() handle_action(state_obj, "delete")   end, vim.tbl_extend("force", o, { desc = "Todoist: delete task"            }))
   vim.keymap.set('n', '<leader>tr', function() refresh_with_loader(state_obj)        end, vim.tbl_extend("force", o, { desc = "Todoist: refresh"                }))
   vim.keymap.set('n', '<leader>tn', function() open_create_window(state_obj)         end, vim.tbl_extend("force", o, { desc = "Todoist: new task"               }))
@@ -1148,7 +1164,7 @@ function M.show_today(tasks, opts)
     return
   end
 
-  local line_map, task_map, lines = render_grouped_tasks(layout.buf, tasks, project_lookup)
+  local line_map, task_map, lines = render_grouped_tasks(layout.buf, tasks, project_lookup, {})
   if not line_map then
     vim.notify("Failed to render task list", vim.log.levels.ERROR)
     return
@@ -1166,8 +1182,9 @@ function M.show_today(tasks, opts)
     project_lookup = project_lookup,
     search_mode    = false,
     search_query   = "",
-    show_completed = false,
-    is_loading     = false,
+    show_completed  = false,
+    expanded_tasks  = {},
+    is_loading      = false,
     loader_id      = nil,
     on_refresh     = opts.on_refresh,
     on_complete    = opts.on_complete,
