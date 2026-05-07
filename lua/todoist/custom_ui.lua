@@ -466,64 +466,17 @@ local function setup_navigation(state_obj)
   vim.keymap.set('n', '<C-u>',  function() move_cursor(state_obj, -10)        end, vim.tbl_extend("force", o, { desc = "Scroll up"      }))
 end
 
-local function fuzzy_match(query, text)
-  if not query or query == "" then return true, 1000 end
-  query = query:lower()
-  text  = text:lower()
-  local pos = text:find(query, 1, true)
-  if pos then return true, 1000 - pos end
-  return false, 0
-end
-
-local function search_tasks(tasks, query, project_lookup)
-  if not query or query == "" then return tasks end
-
-  local results = {}
-  for _, task in ipairs(tasks) do
-    local project = resolve_project(task, project_lookup)
-    local searchable = table.concat({
-      task.content or "",
-      task.description or "",
-      project.name or "",
-      "P" .. (task.priority or 1),
-      (task.due and type(task.due) == "table" and task.due.string) or "",
-    }, " ")
-    local matches, score = fuzzy_match(query, searchable)
-    if matches then table.insert(results, { task = task, score = score }) end
-  end
-
-  table.sort(results, function(a, b) return a.score > b.score end)
-
-  local filtered = {}
-  for _, item in ipairs(results) do table.insert(filtered, item.task) end
-  return filtered
-end
-
 local function refresh_ui(state_obj)
   if not state_obj or not vim.api.nvim_buf_is_valid(state_obj.buf) then return end
 
-  local tasks_to_display = (state_obj.search_mode or state_obj.filter_locked)
-    and state_obj.filtered_tasks or state_obj.tasks
-
-  local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, tasks_to_display, state_obj.project_lookup, state_obj.expanded_tasks)
+  local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, state_obj.tasks, state_obj.project_lookup, state_obj.expanded_tasks)
   state_obj.line_map = line_map
   state_obj.task_map = task_map
 
   apply_highlights(state_obj.buf, lines, line_map)
 
-  if state_obj.search_mode then
-    local search_line = string.format("Search: %s_", state_obj.search_query)
-    vim.api.nvim_buf_set_option(state_obj.buf, 'modifiable', true)
-    vim.api.nvim_buf_set_lines(state_obj.buf, 0, 1, false, { search_line })
-    vim.api.nvim_buf_set_option(state_obj.buf, 'modifiable', false)
-
-    local new_map = { [1] = { type = "search_prompt" } }
-    for n, info in pairs(line_map) do new_map[n + 1] = info end
-    state_obj.line_map = new_map
-  end
-
   vim.schedule(function()
-    move_cursor(state_obj, state_obj.search_mode and 1 or 0)
+    move_cursor(state_obj, 0)
   end)
 end
 
@@ -577,9 +530,6 @@ local function refresh_with_loader(state_obj)
 
         local project_lookup     = build_project_lookup(projects)
         state_obj.tasks          = all_tasks
-        state_obj.filtered_tasks = all_tasks
-        state_obj.filter_locked  = false
-        state_obj.search_query   = ""
         state_obj.project_lookup = project_lookup
 
         refresh_ui(state_obj)
@@ -596,53 +546,6 @@ local function refresh_with_loader(state_obj)
     end
   end)
   return true
-end
-
-local function exit_search_mode(state_obj)
-  local buf = state_obj.buf
-  for i = 32, 126 do
-    pcall(vim.keymap.del, 'n', string.char(i), { buffer = buf })
-  end
-  pcall(vim.keymap.del, 'n', '<BS>',  { buffer = buf })
-  pcall(vim.keymap.del, 'n', '<Esc>', { buffer = buf })
-  pcall(vim.keymap.del, 'n', '<CR>',  { buffer = buf })
-  state_obj.search_mode   = false
-  state_obj.filter_locked = state_obj.search_query ~= ""
-  refresh_ui(state_obj)
-  setup_navigation(state_obj)
-  setup_actions(state_obj)
-end
-
-local function enter_search_mode(state_obj)
-  state_obj.search_mode    = true
-  state_obj.search_query   = ""
-  state_obj.filtered_tasks = state_obj.tasks
-
-  refresh_ui(state_obj)
-
-  local buf = state_obj.buf
-
-  for i = 32, 126 do
-    local char = string.char(i)
-    vim.keymap.set('n', char, function()
-      state_obj.search_query   = state_obj.search_query .. char
-      state_obj.filtered_tasks = search_tasks(state_obj.tasks, state_obj.search_query, state_obj.project_lookup)
-      refresh_ui(state_obj)
-    end, { buffer = buf, noremap = true, silent = true })
-  end
-
-  vim.keymap.set('n', '<BS>', function()
-    if #state_obj.search_query > 0 then
-      state_obj.search_query   = state_obj.search_query:sub(1, -2)
-      state_obj.filtered_tasks = search_tasks(state_obj.tasks, state_obj.search_query, state_obj.project_lookup)
-      refresh_ui(state_obj)
-    end
-  end, { buffer = buf, noremap = true, silent = true })
-
-  vim.keymap.set('n', '<Esc>', function() exit_search_mode(state_obj) end,
-    { buffer = buf, noremap = true, silent = true })
-  vim.keymap.set('n', '<CR>', function() exit_search_mode(state_obj) end,
-    { buffer = buf, noremap = true, silent = true })
 end
 
 local function setup_autocmds(state_obj)
@@ -716,9 +619,8 @@ local function open_create_window(state_obj)
   end
   local selected_parent = nil  -- { id, content } or nil
 
-  local buf = vim.api.nvim_create_buf(false, true)
+  local buf = vim.api.nvim_create_buf(false, false)
   pcall(function()
-    vim.api.nvim_buf_set_option(buf, 'buftype', 'nofile')
     vim.api.nvim_buf_set_option(buf, 'swapfile', false)
     vim.api.nvim_buf_set_option(buf, 'bufhidden', 'wipe')
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
@@ -916,9 +818,8 @@ local function open_edit_window(task, state_obj)
     original_due = task.due.string or task.due.date or ""
   end
 
-  local buf = vim.api.nvim_create_buf(false, true)
+  local buf = vim.api.nvim_create_buf(false, false)
   pcall(function()
-    vim.api.nvim_buf_set_option(buf, 'buftype', 'nofile')
     vim.api.nvim_buf_set_option(buf, 'swapfile', false)
     vim.api.nvim_buf_set_option(buf, 'bufhidden', 'wipe')
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
@@ -1262,7 +1163,6 @@ function setup_actions(state_obj)
       vim.notify(msg)
     end
   end, vim.tbl_extend("force", o, { desc = "Todoist: toggle completed tasks" }))
-  vim.keymap.set('n', '/',          function() enter_search_mode(state_obj)          end, vim.tbl_extend("force", o, { desc = "Todoist: search tasks"           }))
 end
 
 -- Main entry point
@@ -1291,13 +1191,9 @@ function M.show_today(tasks, opts)
     buf            = layout.buf,
     win            = layout.win,
     tasks          = tasks or {},
-    filtered_tasks = tasks or {},
     line_map       = line_map,
     task_map       = task_map,
     project_lookup = project_lookup,
-    search_mode    = false,
-    search_query   = "",
-    filter_locked  = false,
     show_completed  = false,
     expanded_tasks  = {},
     is_loading      = false,

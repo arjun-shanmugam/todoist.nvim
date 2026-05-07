@@ -134,16 +134,18 @@ Tasks are displayed in a floating window grouped by project. Within each project
 | `<leader>td` | Delete task under cursor |
 | `<leader>tr` | Refresh task list from API |
 | `<leader>ts` | Toggle display of completed tasks |
-| `/` | Enter search / filter mode |
+| `/` | Search (native Vim search — type pattern, `n`/`N` to jump between matches) |
 | `<leader>wx` | Close the task view |
 
-### Search Mode
+### Search
 
-Press `/` to enter search mode. Type to filter tasks by content, project, or due date. Results update live.
+Press `/` to use Vim's native search. Task content, descriptions, project headers, and due dates are all searchable since they are real buffer lines.
 
-- `<Esc>` or `<CR>` — exit typing mode; the filtered view stays active so you can interact with results normally
-- `<BS>` — delete the last character in the search query
-- `<leader>tr` — clear the filter and refresh all tasks
+- **`/pattern<CR>`** — search and jump to first match
+- **`n` / `N`** — jump to next / previous match
+- **`:noh`** — clear search highlights
+
+All task action keymaps work normally during and after search.
 
 ### Visual Mode & Yanking
 
