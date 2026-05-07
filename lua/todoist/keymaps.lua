@@ -3,7 +3,7 @@ local M = {}
 local defaults = {
   enable = true,
   mappings = {
-    open_tasks = "<leader>tt",
+    open_tasks = "<leader>to",
     login  = "<leader>tl",
     logout = "<leader>tL",
   }
