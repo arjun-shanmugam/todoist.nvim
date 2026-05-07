@@ -163,12 +163,12 @@ function M.update_task(token, task_id, updates, cb)
   }, cb)
 end
 
-function M.move_task(token, task_id, project_id, cb)
+function M.move_task(token, task_id, body, cb)
   request({
     method = "POST",
     path = string.format("/tasks/%s/move", task_id),
     token = token,
-    body = { project_id = project_id },
+    body = body,
   }, cb)
 end
 
@@ -206,7 +206,7 @@ function M.fetch_completed_tasks(token, cb)
         completed_at = item.completed_at,
         priority     = 1,
         parent_id    = nil,
-        description  = "",
+        description  = item.description or "",
         due          = nil,
         children     = {},
       })
