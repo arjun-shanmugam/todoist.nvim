@@ -857,7 +857,6 @@ local function open_create_window(state_obj)
     end)
   end
   vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
-  vim.keymap.set('n', '<Esc>',      close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
 end
 
 -- Floating editor for task title + description
@@ -1035,7 +1034,6 @@ local function open_edit_window(task, state_obj)
     refocus()
   end
   vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
-  vim.keymap.set('n', '<Esc>',      close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
 end
 
 local function handle_action(state_obj, action_type)
@@ -1141,7 +1139,7 @@ function setup_actions(state_obj)
     refresh_ui(state_obj)
   end, vim.tbl_extend("force", o, { desc = "Todoist: toggle description"    }))
   vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, vim.tbl_extend("force", o, { desc = "Todoist: edit task"              }))
-  vim.keymap.set('n', '<leader>tx', function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: toggle complete"        }))
+  vim.keymap.set('n', '<leader>tc', function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: toggle complete"        }))
   vim.keymap.set('n', '<leader>td', function() handle_action(state_obj, "delete")   end, vim.tbl_extend("force", o, { desc = "Todoist: delete task"            }))
   vim.keymap.set('n', '<leader>tr', function() refresh_with_loader(state_obj)        end, vim.tbl_extend("force", o, { desc = "Todoist: refresh"                }))
   vim.keymap.set('n', '<leader>tn', function() open_create_window(state_obj)         end, vim.tbl_extend("force", o, { desc = "Todoist: new task"               }))
@@ -1219,7 +1217,7 @@ function M.show_today(tasks, opts)
   end, { buffer = layout.buf, noremap = true, silent = true, desc = "Todoist: send to Claude" })
 
   -- Close
-  vim.keymap.set('n', 'q', function()
+  vim.keymap.set('n', '<leader>wx', function()
     if state.augroup then
       pcall(vim.api.nvim_del_augroup_by_id, state.augroup)
     end
