@@ -487,7 +487,8 @@ end
 local function refresh_ui(state_obj)
   if not state_obj or not vim.api.nvim_buf_is_valid(state_obj.buf) then return end
 
-  local tasks_to_display = state_obj.search_mode and state_obj.filtered_tasks or state_obj.tasks
+  local tasks_to_display = (state_obj.search_mode or state_obj.filter_locked)
+    and state_obj.filtered_tasks or state_obj.tasks
 
   local line_map, task_map, lines = render_grouped_tasks(state_obj.buf, tasks_to_display, state_obj.project_lookup, state_obj.expanded_tasks)
   state_obj.line_map = line_map
@@ -562,6 +563,8 @@ local function refresh_with_loader(state_obj)
         local project_lookup     = build_project_lookup(projects)
         state_obj.tasks          = all_tasks
         state_obj.filtered_tasks = all_tasks
+        state_obj.filter_locked  = false
+        state_obj.search_query   = ""
         state_obj.project_lookup = project_lookup
 
         refresh_ui(state_obj)
@@ -578,6 +581,21 @@ local function refresh_with_loader(state_obj)
     end
   end)
   return true
+end
+
+local function exit_search_mode(state_obj)
+  local buf = state_obj.buf
+  for i = 32, 126 do
+    pcall(vim.keymap.del, 'n', string.char(i), { buffer = buf })
+  end
+  pcall(vim.keymap.del, 'n', '<BS>',  { buffer = buf })
+  pcall(vim.keymap.del, 'n', '<Esc>', { buffer = buf })
+  pcall(vim.keymap.del, 'n', '<CR>',  { buffer = buf })
+  state_obj.search_mode   = false
+  state_obj.filter_locked = state_obj.search_query ~= ""
+  refresh_ui(state_obj)
+  setup_navigation(state_obj)
+  setup_actions(state_obj)
 end
 
 local function enter_search_mode(state_obj)
@@ -606,25 +624,10 @@ local function enter_search_mode(state_obj)
     end
   end, { buffer = buf, noremap = true, silent = true })
 
-  vim.keymap.set('n', '<Esc>', function()
-    exit_search_mode(state_obj)
-  end, { buffer = buf, noremap = true, silent = true })
-
-  vim.keymap.set('n', '<CR>', function()
-    state_obj.search_mode = false
-    refresh_ui(state_obj)
-    setup_navigation(state_obj)
-    setup_actions(state_obj)
-  end, { buffer = buf, noremap = true, silent = true })
-end
-
-function exit_search_mode(state_obj)
-  state_obj.search_mode    = false
-  state_obj.search_query   = ""
-  state_obj.filtered_tasks = state_obj.tasks
-  refresh_ui(state_obj)
-  setup_navigation(state_obj)
-  setup_actions(state_obj)
+  vim.keymap.set('n', '<Esc>', function() exit_search_mode(state_obj) end,
+    { buffer = buf, noremap = true, silent = true })
+  vim.keymap.set('n', '<CR>', function() exit_search_mode(state_obj) end,
+    { buffer = buf, noremap = true, silent = true })
 end
 
 local function setup_autocmds(state_obj)
@@ -1187,6 +1190,7 @@ function M.show_today(tasks, opts)
     project_lookup = project_lookup,
     search_mode    = false,
     search_query   = "",
+    filter_locked  = false,
     show_completed  = false,
     expanded_tasks  = {},
     is_loading      = false,
