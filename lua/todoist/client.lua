@@ -196,22 +196,38 @@ function M.fetch_completed_tasks(token, cb)
   }, function(err, data)
     if err then return cb(err) end
     local items = type(data) == "table" and data.items or {}
-    local tasks = {}
+    if #items == 0 then return cb(nil, {}) end
+
+    local results   = {}
+    local remaining = #items
     for _, item in ipairs(items) do
-      table.insert(tasks, {
-        id           = item.task_id,
-        content      = item.content or "",
-        project_id   = item.project_id,
-        checked      = true,
-        completed_at = item.completed_at,
-        priority     = 1,
-        parent_id    = nil,
-        description  = item.description or "",
-        due          = nil,
-        children     = {},
-      })
+      request({
+        method = "GET",
+        path   = string.format("/tasks/%s", item.task_id),
+        token  = token,
+      }, function(terr, full)
+        if not terr and full then
+          full.checked  = true
+          full.children = {}
+          table.insert(results, full)
+        else
+          table.insert(results, {
+            id           = item.task_id,
+            content      = item.content or "",
+            project_id   = item.project_id,
+            checked      = true,
+            completed_at = item.completed_at,
+            priority     = 1,
+            parent_id    = nil,
+            description  = item.description or "",
+            due          = nil,
+            children     = {},
+          })
+        end
+        remaining = remaining - 1
+        if remaining == 0 then cb(nil, results) end
+      end)
     end
-    cb(nil, tasks)
   end)
 end
 

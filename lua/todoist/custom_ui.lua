@@ -186,7 +186,11 @@ local function build_task_tree(tasks)
   end
 
   local function sort_tree(nodes)
-    table.sort(nodes, function(a, b) return (a.priority or 1) > (b.priority or 1) end)
+    table.sort(nodes, function(a, b)
+      -- Active tasks before completed; within each group sort by priority desc
+      if (not a.checked) ~= (not b.checked) then return not a.checked end
+      return (a.priority or 1) > (b.priority or 1)
+    end)
     for _, t in ipairs(nodes) do
       if #t.children > 0 then sort_tree(t.children) end
     end
@@ -197,7 +201,7 @@ local function build_task_tree(tasks)
 end
 
 -- Group tasks by project; returns ordered list of groups.
--- Each group has .roots (active task tree) and .completed (sorted by completed_at asc).
+-- Each group has .roots built from ALL tasks (active + completed) in the tree.
 local function group_tasks_by_project(tasks, project_lookup)
   local group_map = {}
   local group_order = {}
@@ -208,14 +212,10 @@ local function group_tasks_by_project(tasks, project_lookup)
       local project = project_lookup and project_lookup[pid]
       local name = project and project.name or (task.project_id and ("Project " .. task.project_id) or "Inbox")
       local color = project and project.color or project_color_to_ansi("charcoal")
-      group_map[pid] = { project_name = name, project_color = color, active = {}, completed = {} }
+      group_map[pid] = { project_name = name, project_color = color, all = {} }
       table.insert(group_order, pid)
     end
-    if task.checked then
-      table.insert(group_map[pid].completed, task)
-    else
-      table.insert(group_map[pid].active, task)
-    end
+    table.insert(group_map[pid].all, task)
   end
 
   table.sort(group_order, function(a, b)
@@ -225,10 +225,7 @@ local function group_tasks_by_project(tasks, project_lookup)
   local groups = {}
   for _, pid in ipairs(group_order) do
     local g = group_map[pid]
-    table.sort(g.completed, function(a, b)
-      return (a.completed_at or "") < (b.completed_at or "")
-    end)
-    g.roots = build_task_tree(g.active)
+    g.roots = build_task_tree(g.all)
     table.insert(groups, g)
   end
   return groups
@@ -297,12 +294,11 @@ local function render_grouped_tasks(buf, tasks, project_lookup, expanded_tasks)
   local groups = group_tasks_by_project(tasks, project_lookup)
 
   for _, group in ipairs(groups) do
-    local n_completed = #group.completed
-    local n_active    = count_tasks(group.roots)
-    if n_completed + n_active > 0 then
+    local n_total = count_tasks(group.roots)
+    if n_total > 0 then
       has_tasks = true
 
-      local header = format_project_header(group.project_name, n_completed + n_active)
+      local header = format_project_header(group.project_name, n_total)
       table.insert(lines, header)
       line_map[line_num] = {
         type = "header",
@@ -311,30 +307,7 @@ local function render_grouped_tasks(buf, tasks, project_lookup, expanded_tasks)
       }
       line_num = line_num + 1
 
-      -- Completed tasks first (flat, sorted oldest→newest)
-      for _, task in ipairs(group.completed) do
-        table.insert(lines, format_task_entry(task, 0))
-        line_map[line_num] = { type = "task", task_id = task.id, task = task, depth = 0 }
-        if task.id then task_map[tostring(task.id)] = task end
-        line_num = line_num + 1
-
-        if task.description and task.description ~= ""
-          and expanded_tasks and expanded_tasks[tostring(task.id)]
-        then
-          local first_line = true
-          for desc_line in (task.description .. "\n"):gmatch("([^\n]*)\n") do
-            if desc_line ~= "" then
-              local prefix = first_line and "    ↳ " or "      "
-              table.insert(lines, prefix .. desc_line)
-              line_map[line_num] = { type = "description" }
-              line_num = line_num + 1
-              first_line = false
-            end
-          end
-        end
-      end
-
-      -- Then active tasks (with hierarchy)
+      -- Render all tasks (active and completed) in their natural hierarchy
       line_num = render_tree(group.roots, 0, lines, line_map, line_num, task_map, expanded_tasks)
 
       table.insert(lines, "")
@@ -799,16 +772,17 @@ local function open_edit_window(task, state_obj)
     if p then selected_project = { id = task.project_id, name = p.name } end
   end
 
+  local function do_open(real_parent_id)
   local selected_parent = nil
-  if task.parent_id then
+  if real_parent_id then
     for _, t in ipairs(state_obj.tasks or {}) do
-      if tostring(t.id) == tostring(task.parent_id) then
+      if tostring(t.id) == tostring(real_parent_id) then
         selected_parent = { id = t.id, content = t.content }
         break
       end
     end
     if not selected_parent then
-      selected_parent = { id = task.parent_id, content = "(parent task)" }
+      selected_parent = { id = real_parent_id, content = "(parent task)" }
     end
   end
 
@@ -1011,6 +985,22 @@ local function open_edit_window(task, state_obj)
     refocus()
   end
   vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
+  end -- do_open
+
+  if task.checked and not task.parent_id then
+    local token = require("todoist.auth").load_token()
+    if token then
+      require("todoist.client").get_task(token, task.id, function(err, full_task)
+        vim.schedule(function()
+          do_open(not err and full_task and full_task.parent_id or nil)
+        end)
+      end)
+    else
+      do_open(nil)
+    end
+  else
+    do_open(task.parent_id)
+  end
 end
 
 local function handle_action(state_obj, action_type)
