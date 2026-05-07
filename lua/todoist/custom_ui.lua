@@ -765,7 +765,6 @@ local function open_create_window(state_obj)
   pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
 
   vim.api.nvim_win_set_cursor(win, { 2, 0 })
-  vim.cmd("startinsert!")
 
   local function save_and_close()
     local lines       = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
@@ -957,8 +956,7 @@ local function open_edit_window(task, state_obj)
   pcall(vim.api.nvim_win_set_option, win, 'linebreak', true)
   pcall(vim.api.nvim_win_set_option, win, 'cursorline', true)
 
-  vim.api.nvim_win_set_cursor(win, { 2, #(task.content or "") })
-  vim.cmd("startinsert!")
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
 
   local function save_and_close()
     local lines       = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
