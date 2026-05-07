@@ -882,6 +882,19 @@ local function open_edit_window(task, state_obj)
     if p then selected_project = { id = task.project_id, name = p.name } end
   end
 
+  local selected_parent = nil
+  if task.parent_id then
+    for _, t in ipairs(state_obj.tasks or {}) do
+      if tostring(t.id) == tostring(task.parent_id) then
+        selected_parent = { id = t.id, content = t.content }
+        break
+      end
+    end
+    if not selected_parent then
+      selected_parent = { id = task.parent_id, content = "(parent task)" }
+    end
+  end
+
   -- Resolve current due date string for display
   local original_due = ""
   if task.due and type(task.due) == "table" then
@@ -918,9 +931,13 @@ local function open_edit_window(task, state_obj)
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "TodoistEditLabel" })
 
   local function render_header()
+    local parent_name = selected_parent and selected_parent.content or "None"
     local opts = {
       virt_lines = {
         { { "  " .. selected_project.name, "TodoistEditProjectName" } },
+        { { sep,                            "TodoistEditSep"         } },
+        { { "  Parent Task",               "TodoistEditLabel"       } },
+        { { "  " .. parent_name,           "TodoistEditProjectName" } },
         { { sep,                            "TodoistEditSep"         } },
         { { "  Title",                      "TodoistEditLabel"       } },
       },
@@ -997,7 +1014,20 @@ local function open_edit_window(task, state_obj)
       new_project_id = selected_project.id
     end
 
-    if not next(updates) and not new_project_id then
+    -- parent_id goes through /move, not the update body
+    -- nil = no change, false = clear parent, string = new parent id
+    local new_parent_id = nil
+    local clear_parent_project_id = nil  -- project to move to when clearing parent
+    if tostring(selected_parent and selected_parent.id or "") ~= tostring(task.parent_id or "") then
+      if selected_parent then
+        new_parent_id = selected_parent.id
+      else
+        new_parent_id = false
+        clear_parent_project_id = selected_project.id or task.project_id
+      end
+    end
+
+    if not next(updates) and not new_project_id and new_parent_id == nil then
       vim.schedule(function()
         if vim.api.nvim_win_is_valid(state_obj.win) then
           vim.api.nvim_set_current_win(state_obj.win)
@@ -1005,7 +1035,7 @@ local function open_edit_window(task, state_obj)
       end)
       return
     end
-    update_task_field(task.id, updates, new_project_id, state_obj)
+    update_task_field(task.id, updates, new_project_id, new_parent_id, clear_parent_project_id, state_obj)
   end
 
   local function pick_project()
@@ -1014,8 +1044,37 @@ local function open_edit_window(task, state_obj)
     vim.ui.select(names, { prompt = "Select project: " }, function(choice)
       if not choice then return end
       for _, c in ipairs(choices) do
-        if c.name == choice then selected_project = c; render_header(); return end
+        if c.name == choice then
+          selected_project = c
+          selected_parent  = nil  -- clear parent; it belongs to the old project
+          render_header()
+          return
+        end
       end
+    end)
+  end
+
+  local function pick_parent()
+    local candidates = {}
+    for _, t in ipairs(state_obj.tasks or {}) do
+      if not t.checked
+        and tostring(t.project_id or "") == tostring(selected_project.id or "")
+        and tostring(t.id) ~= tostring(task.id)
+      then
+        table.insert(candidates, t)
+      end
+    end
+    table.sort(candidates, function(a, b)
+      return (a.content or ""):lower() < (b.content or ""):lower()
+    end)
+    local names = { "  None (top-level task)" }
+    for _, t in ipairs(candidates) do
+      table.insert(names, "  " .. (t.content or "(no content)"))
+    end
+    vim.ui.select(names, { prompt = "Select parent task: " }, function(_, idx)
+      if not idx then return end
+      selected_parent = idx == 1 and nil or candidates[idx - 1]
+      render_header()
     end)
   end
 
@@ -1030,6 +1089,7 @@ local function open_edit_window(task, state_obj)
   local o = { buffer = buf, noremap = true, silent = true }
   vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save task"      }))
   vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project" }))
+  vim.keymap.set('n', '<leader>ta', pick_parent,    vim.tbl_extend("force", o, { desc = "Todoist: assign parent"  }))
   local function close()
     pcall(vim.api.nvim_win_close, win, true)
     refocus()
@@ -1092,15 +1152,23 @@ local function handle_action(state_obj, action_type)
   end
 end
 
-function update_task_field(task_id, updates, new_project_id, state_obj)
+function update_task_field(task_id, updates, new_project_id, new_parent_id, clear_parent_project_id, state_obj)
   local auth   = require("todoist.auth")
   local client = require("todoist.client")
   local token  = auth.load_token()
   if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
 
   local function do_move_then_refresh()
-    if new_project_id then
-      client.move_task(token, task_id, new_project_id, function(err)
+    if new_parent_id ~= nil then
+      local move_body = new_parent_id and { parent_id = new_parent_id }
+                                       or { project_id = new_project_id or clear_parent_project_id }
+      client.move_task(token, task_id, move_body, function(err)
+        if err then vim.notify("Move failed: " .. err, vim.log.levels.ERROR); return end
+        vim.notify("Task updated", vim.log.levels.INFO)
+        refresh_with_loader(state_obj)
+      end)
+    elseif new_project_id then
+      client.move_task(token, task_id, { project_id = new_project_id }, function(err)
         if err then vim.notify("Move failed: " .. err, vim.log.levels.ERROR); return end
         vim.notify("Task updated", vim.log.levels.INFO)
         refresh_with_loader(state_obj)
@@ -1116,7 +1184,7 @@ function update_task_field(task_id, updates, new_project_id, state_obj)
       if err then vim.notify("Update failed: " .. err, vim.log.levels.ERROR); return end
       do_move_then_refresh()
     end)
-  elseif new_project_id then
+  elseif new_project_id or new_parent_id ~= nil then
     do_move_then_refresh()
   end
 end
