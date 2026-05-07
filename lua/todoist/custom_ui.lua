@@ -317,6 +317,21 @@ local function render_grouped_tasks(buf, tasks, project_lookup, expanded_tasks)
         line_map[line_num] = { type = "task", task_id = task.id, task = task, depth = 0 }
         if task.id then task_map[tostring(task.id)] = task end
         line_num = line_num + 1
+
+        if task.description and task.description ~= ""
+          and expanded_tasks and expanded_tasks[tostring(task.id)]
+        then
+          local first_line = true
+          for desc_line in (task.description .. "\n"):gmatch("([^\n]*)\n") do
+            if desc_line ~= "" then
+              local prefix = first_line and "    ↳ " or "      "
+              table.insert(lines, prefix .. desc_line)
+              line_map[line_num] = { type = "description" }
+              line_num = line_num + 1
+              first_line = false
+            end
+          end
+        end
       end
 
       -- Then active tasks (with hierarchy)
@@ -1198,14 +1213,38 @@ function setup_actions(state_obj)
     local line_info = state_obj.line_map[cursor[1]]
     if not line_info or line_info.type ~= "task" then return end
     local task = line_info.task
-    if not task.description or task.description == "" then return end
-    local id = tostring(task.id)
-    if state_obj.expanded_tasks[id] then
-      state_obj.expanded_tasks[id] = nil
-    else
-      state_obj.expanded_tasks[id] = true
+
+    local function toggle(t)
+      if not t.description or t.description == "" then return end
+      local id = tostring(t.id)
+      if state_obj.expanded_tasks[id] then
+        state_obj.expanded_tasks[id] = nil
+      else
+        state_obj.expanded_tasks[id] = true
+      end
+      refresh_ui(state_obj)
     end
-    refresh_ui(state_obj)
+
+    -- Completed tasks may not have descriptions loaded; fetch on demand
+    if task.checked and (not task.description or task.description == "") then
+      local auth   = require("todoist.auth")
+      local client = require("todoist.client")
+      local token  = auth.load_token()
+      if not token then return end
+      client.get_task(token, task.id, function(err, full_task)
+        if err or not full_task then return end
+        task.description = full_task.description or ""
+        for _, t in ipairs(state_obj.tasks) do
+          if tostring(t.id) == tostring(task.id) then
+            t.description = task.description
+            break
+          end
+        end
+        toggle(task)
+      end)
+    else
+      toggle(task)
+    end
   end, vim.tbl_extend("force", o, { desc = "Todoist: toggle description"    }))
   vim.keymap.set('n', '<leader>te', function() handle_action(state_obj, "edit")     end, vim.tbl_extend("force", o, { desc = "Todoist: edit task"              }))
   vim.keymap.set('n', '<leader>tc', function() handle_action(state_obj, "complete") end, vim.tbl_extend("force", o, { desc = "Todoist: toggle complete"        }))
