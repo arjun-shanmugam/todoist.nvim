@@ -396,10 +396,7 @@ local function move_cursor(state_obj, delta)
 
   local cursor     = vim.api.nvim_win_get_cursor(state_obj.win)
   local current    = cursor[1]
-  local target     = current + delta
   local line_count = vim.api.nvim_buf_line_count(state_obj.buf)
-
-  target = math.max(1, math.min(target, line_count))
 
   local has_tasks = false
   for _, info in pairs(state_obj.line_map) do
@@ -411,12 +408,24 @@ local function move_cursor(state_obj, delta)
     return
   end
 
-  local max_iter  = line_count + 1
-  local iter      = 0
+  local target, scan_dir
+  if delta == math.huge then
+    target   = line_count
+    scan_dir = -1  -- scan backwards from end to find last task
+  elseif delta == -math.huge then
+    target   = 1
+    scan_dir = 1   -- scan forwards from start to find first task
+  else
+    target   = math.max(1, math.min(current + delta, line_count))
+    scan_dir = delta > 0 and 1 or -1
+  end
+
+  local max_iter = line_count + 1
+  local iter     = 0
   while target >= 1 and target <= line_count and iter < max_iter do
     local info = state_obj.line_map[target]
     if info and info.type == "task" then break end
-    target = target + (delta > 0 and 1 or -1)
+    target = target + scan_dir
     iter   = iter + 1
   end
 
@@ -432,10 +441,10 @@ local function setup_navigation(state_obj)
   local buf = state_obj.buf
   local o   = { buffer = buf, noremap = true, silent = true }
 
-  vim.keymap.set('n', 'j',      function() move_cursor(state_obj,  1)         end, vim.tbl_extend("force", o, { desc = "Next task"      }))
-  vim.keymap.set('n', 'k',      function() move_cursor(state_obj, -1)         end, vim.tbl_extend("force", o, { desc = "Prev task"      }))
-  vim.keymap.set('n', '<Down>', function() move_cursor(state_obj,  1)         end, vim.tbl_extend("force", o, { desc = "Next task"      }))
-  vim.keymap.set('n', '<Up>',   function() move_cursor(state_obj, -1)         end, vim.tbl_extend("force", o, { desc = "Prev task"      }))
+  vim.keymap.set('n', 'j',      function() move_cursor(state_obj,  vim.v.count1) end, vim.tbl_extend("force", o, { desc = "Next task"      }))
+  vim.keymap.set('n', 'k',      function() move_cursor(state_obj, -vim.v.count1) end, vim.tbl_extend("force", o, { desc = "Prev task"      }))
+  vim.keymap.set('n', '<Down>', function() move_cursor(state_obj,  vim.v.count1) end, vim.tbl_extend("force", o, { desc = "Next task"      }))
+  vim.keymap.set('n', '<Up>',   function() move_cursor(state_obj, -vim.v.count1) end, vim.tbl_extend("force", o, { desc = "Prev task"      }))
   vim.keymap.set('n', 'gg',     function() move_cursor(state_obj, -math.huge) end, vim.tbl_extend("force", o, { desc = "First task"     }))
   vim.keymap.set('n', 'G',      function() move_cursor(state_obj,  math.huge) end, vim.tbl_extend("force", o, { desc = "Last task"      }))
   vim.keymap.set('n', '<C-d>',  function() move_cursor(state_obj,  10)        end, vim.tbl_extend("force", o, { desc = "Scroll down"    }))
