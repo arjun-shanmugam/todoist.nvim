@@ -496,10 +496,20 @@ local function refresh_with_loader(state_obj)
           vim.notify("Warning: Failed to fetch projects: " .. project_err, vim.log.levels.WARN)
         end
 
-        -- Merge completed tasks into the main list (grouped rendering handles ordering)
+        -- Merge completed tasks into the main list; deduplicate by ID so a task that
+        -- was just reopened (still in /tasks/completed due to eventual consistency)
+        -- doesn't appear twice with conflicting checked state.
+        local seen = {}
         local all_tasks = {}
-        for _, t in ipairs(tasks or {}) do table.insert(all_tasks, t) end
-        for _, t in ipairs(completed or {}) do table.insert(all_tasks, t) end
+        for _, t in ipairs(tasks or {}) do
+          seen[tostring(t.id)] = true
+          table.insert(all_tasks, t)
+        end
+        for _, t in ipairs(completed or {}) do
+          if not seen[tostring(t.id)] then
+            table.insert(all_tasks, t)
+          end
+        end
 
         local project_lookup     = build_project_lookup(projects)
         state_obj.tasks          = all_tasks
