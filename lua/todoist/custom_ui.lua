@@ -187,9 +187,8 @@ local function build_task_tree(tasks)
 
   local function sort_tree(nodes)
     table.sort(nodes, function(a, b)
-      -- Active tasks before completed; within each group sort by priority desc
       if (not a.checked) ~= (not b.checked) then return not a.checked end
-      return (a.priority or 1) > (b.priority or 1)
+      return (a.child_order or 0) < (b.child_order or 0)
     end)
     for _, t in ipairs(nodes) do
       if #t.children > 0 then sort_tree(t.children) end
