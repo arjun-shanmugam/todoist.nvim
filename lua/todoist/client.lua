@@ -134,7 +134,7 @@ function M.fetch_tasks(token, opts, cb)
         table.insert(all_results, t)
       end
       local next_cursor = type(data) == "table" and data.next_cursor or nil
-      if next_cursor and next_cursor ~= "" then
+      if next_cursor and next_cursor ~= vim.NIL and next_cursor ~= "" then
         fetch_page(next_cursor)
       else
         cb(nil, all_results)
