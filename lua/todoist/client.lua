@@ -115,18 +115,34 @@ local function request(opts, cb)
 end
 
 function M.fetch_tasks(token, opts, cb)
-  request({
-    method = "GET",
-    path = "/tasks",
-    token = token,
-    query = {
-      project_id = opts and opts.project_id or nil,
-      filter = opts and opts.filter or nil,
-    },
-  }, function(err, data)
-    if err then return cb(err) end
-    cb(nil, type(data) == "table" and data.results or data)
-  end)
+  local all_results = {}
+
+  local function fetch_page(cursor)
+    request({
+      method = "GET",
+      path   = "/tasks",
+      token  = token,
+      query  = {
+        project_id = opts and opts.project_id or nil,
+        filter     = opts and opts.filter or nil,
+        cursor     = cursor or nil,
+      },
+    }, function(err, data)
+      if err then return cb(err) end
+      local page = type(data) == "table" and data.results or data or {}
+      for _, t in ipairs(page) do
+        table.insert(all_results, t)
+      end
+      local next_cursor = type(data) == "table" and data.next_cursor or nil
+      if next_cursor and next_cursor ~= "" then
+        fetch_page(next_cursor)
+      else
+        cb(nil, all_results)
+      end
+    end)
+  end
+
+  fetch_page(nil)
 end
 
 function M.add_task(token, task, cb)
