@@ -602,6 +602,7 @@ local function open_create_window(state_obj)
   local selected_parent = nil  -- { id, content } or nil
 
   local buf = vim.api.nvim_create_buf(false, false)
+  pcall(vim.api.nvim_buf_set_name, buf, "todoist://new-task")
   pcall(function()
     vim.api.nvim_buf_set_option(buf, 'buftype',  'acwrite')
     vim.api.nvim_buf_set_option(buf, 'swapfile', false)
@@ -806,6 +807,7 @@ local function open_edit_window(task, state_obj)
   end
 
   local buf = vim.api.nvim_create_buf(false, false)
+  pcall(vim.api.nvim_buf_set_name, buf, string.format("todoist://edit-%s", task.id))
   pcall(function()
     vim.api.nvim_buf_set_option(buf, 'buftype',  'acwrite')
     vim.api.nvim_buf_set_option(buf, 'swapfile', false)
