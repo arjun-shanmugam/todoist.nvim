@@ -657,7 +657,7 @@ local function open_create_window(state_obj)
     style     = "minimal", border = "rounded", title = " New Task ", title_pos = "center",
   }
   pcall(function()
-    win_opts.footer     = "  <leader>tw save  ·  <leader>tp project  ·  <leader>ta parent  ·  <leader>tq close  "
+    win_opts.footer     = "  :w save  ·  <leader>tp project  ·  <leader>ta parent  ·  :q close  "
     win_opts.footer_pos = "center"
   end)
 
@@ -688,8 +688,6 @@ local function open_create_window(state_obj)
         vim.api.nvim_set_current_win(state_obj.win)
       end
     end)
-
-    local token = require("todoist.auth").load_token()
     if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
 
     local payload = { content = new_content }
@@ -746,7 +744,6 @@ local function open_create_window(state_obj)
   end
 
   local o = { buffer = buf, noremap = true, silent = true }
-  vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save new task"    }))
   vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project"   }))
   vim.keymap.set('n', '<leader>ta', pick_parent,    vim.tbl_extend("force", o, { desc = "Todoist: assign parent"    }))
   local function close()
@@ -757,7 +754,14 @@ local function open_create_window(state_obj)
       end
     end)
   end
-  vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer   = buf,
+    callback = function() save_and_close(); vim.bo[buf].modified = false end,
+  })
+  vim.api.nvim_create_autocmd("QuitPre", {
+    buffer   = buf,
+    callback = function() vim.bo[buf].modified = false end,
+  })
 end
 
 -- Floating editor for task title + description
@@ -866,7 +870,7 @@ local function open_edit_window(task, state_obj)
     style     = "minimal", border = "rounded", title = " Edit Task ", title_pos = "center",
   }
   pcall(function()
-    win_opts.footer     = "  <leader>tw save  ·  <leader>tp project  ·  <leader>ta parent  ·  <leader>tq close  "
+    win_opts.footer     = "  :w save  ·  <leader>tp project  ·  <leader>ta parent  ·  :q close  "
     win_opts.footer_pos = "center"
   end)
 
@@ -986,14 +990,20 @@ local function open_edit_window(task, state_obj)
   end
 
   local o = { buffer = buf, noremap = true, silent = true }
-  vim.keymap.set('n', '<leader>tw', save_and_close, vim.tbl_extend("force", o, { desc = "Todoist: save task"      }))
   vim.keymap.set('n', '<leader>tp', pick_project,   vim.tbl_extend("force", o, { desc = "Todoist: change project" }))
   vim.keymap.set('n', '<leader>ta', pick_parent,    vim.tbl_extend("force", o, { desc = "Todoist: assign parent"  }))
   local function close()
     pcall(vim.api.nvim_win_close, win, true)
     refocus()
   end
-  vim.keymap.set('n', '<leader>tq', close, vim.tbl_extend("force", o, { desc = "Todoist: discard" }))
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer   = buf,
+    callback = function() save_and_close(); vim.bo[buf].modified = false end,
+  })
+  vim.api.nvim_create_autocmd("QuitPre", {
+    buffer   = buf,
+    callback = function() vim.bo[buf].modified = false end,
+  })
   end -- do_open
 
   if task.checked and not task.parent_id then
@@ -1208,6 +1218,13 @@ function M.show_today(tasks, opts)
   setup_actions(state)
   setup_autocmds(state)
 
+  -- Nil state when the window is closed by any means (:q, <leader>wx, etc.)
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern  = tostring(layout.win),
+    once     = true,
+    callback = function() state = nil end,
+  })
+
   -- <leader>as in visual mode: send selected lines from mirror file to ClaudeCode
   vim.keymap.set('v', '<leader>as', function()
     local s  = vim.fn.line("'<")
@@ -1233,6 +1250,19 @@ function M.show_today(tasks, opts)
   vim.schedule(function()
     move_cursor(state, 0)
   end)
+end
+
+function M.is_open()
+  return state ~= nil and vim.api.nvim_win_is_valid(state.win or -1)
+end
+
+function M.close()
+  if not M.is_open() then return end
+  if state.augroup then
+    pcall(vim.api.nvim_del_augroup_by_id, state.augroup)
+  end
+  pcall(vim.api.nvim_win_close, state.win, true)
+  state = nil
 end
 
 return M

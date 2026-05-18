@@ -30,10 +30,14 @@ function M.setup(opts)
   local mappings = config.mappings
 
   if mappings.open_tasks then
-    vim.keymap.set("n", mappings.open_tasks, "<cmd>TodoistTasks<cr>", {
-      desc = "Todoist: open tasks",
-      silent = true,
-    })
+    vim.keymap.set("n", mappings.open_tasks, function()
+      local custom_ui = require("todoist.custom_ui")
+      if custom_ui.is_open() then
+        custom_ui.close()
+      else
+        vim.cmd("TodoistTasks")
+      end
+    end, { desc = "Todoist: toggle tasks", silent = true })
   end
 
   if mappings.login then
