@@ -167,11 +167,22 @@ Standard visual mode (`v`, `V`, `<C-v>`) and yanking (`y`) work normally in the 
 Open with `<leader>tn` from the task view.
 
 ```
-╭─ New Task ──────────────────────────────────────────╮
-│  [type task title here]                             │
-│  [due date — e.g. "tomorrow", "next monday"]        │
-│  [description — optional, supports multiple lines]  │
-╰─ :w save  ·  <leader>tp project  ·  <leader>ta parent  ·  :q close ─╯
+╭─────────────────────── New Task ───────────────────────╮
+│  Project                                               │
+│  Work                                                  │
+│  ─────────────────────────────────────────────────     │
+│  Parent Task                                           │
+│  None                                                  │
+│  ─────────────────────────────────────────────────     │
+│  Title                                                 │
+│  ▎                                                     │
+│  ─────────────────────────────────────────────────     │
+│  Due Date                                              │
+│                                                        │
+│  ─────────────────────────────────────────────────     │
+│  Description                                           │
+│                                                        │
+╰── :w save · <leader>tp project · <leader>ta parent · :q close ──╯
 ```
 
 | Key | Action |
@@ -190,6 +201,25 @@ Open with `<leader>tn` from the task view.
 
 Open with `<leader>te` while the cursor is on a task. The window is pre-populated with the task's
 current title, due date, and description.
+
+```
+╭─────────────────────── Edit Task ──────────────────────╮
+│  Project                                               │
+│  Work                                                  │
+│  ─────────────────────────────────────────────────     │
+│  Parent Task                                           │
+│  Q3 planning                                           │
+│  ─────────────────────────────────────────────────     │
+│  Title                                                 │
+│  Write weekly update                                   │
+│  ─────────────────────────────────────────────────     │
+│  Due Date                                              │
+│  friday                                                │
+│  ─────────────────────────────────────────────────     │
+│  Description                                           │
+│  Include metrics from last sprint                      │
+╰── :w save · <leader>tp project · <leader>ta parent · :q close ──╯
+```
 
 | Key | Action |
 |-----|--------|
