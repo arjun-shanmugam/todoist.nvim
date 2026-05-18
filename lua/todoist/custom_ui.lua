@@ -757,7 +757,7 @@ local function open_create_window(state_obj)
   end
   vim.api.nvim_create_autocmd("BufWriteCmd", {
     buffer   = buf,
-    callback = function() save_and_close(); vim.bo[buf].modified = false end,
+    callback = function() vim.bo[buf].modified = false; save_and_close() end,
   })
   vim.api.nvim_create_autocmd("QuitPre", {
     buffer   = buf,
@@ -1000,7 +1000,7 @@ local function open_edit_window(task, state_obj)
   end
   vim.api.nvim_create_autocmd("BufWriteCmd", {
     buffer   = buf,
-    callback = function() save_and_close(); vim.bo[buf].modified = false end,
+    callback = function() vim.bo[buf].modified = false; save_and_close() end,
   })
   vim.api.nvim_create_autocmd("QuitPre", {
     buffer   = buf,
