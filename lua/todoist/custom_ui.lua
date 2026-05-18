@@ -603,11 +603,11 @@ local function open_create_window(state_obj)
 
   local buf = vim.api.nvim_create_buf(false, false)
   pcall(function()
+    vim.api.nvim_buf_set_option(buf, 'buftype',  'acwrite')
     vim.api.nvim_buf_set_option(buf, 'swapfile', false)
     vim.api.nvim_buf_set_option(buf, 'bufhidden', 'wipe')
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
   end)
-
   -- Layout: line 0 = "  Project" (header, ignored on save)
   --         line 1 = title
   --         line 2 = due date (free text, e.g. "today", "tomorrow", "2025-12-31")
@@ -807,11 +807,11 @@ local function open_edit_window(task, state_obj)
 
   local buf = vim.api.nvim_create_buf(false, false)
   pcall(function()
+    vim.api.nvim_buf_set_option(buf, 'buftype',  'acwrite')
     vim.api.nvim_buf_set_option(buf, 'swapfile', false)
     vim.api.nvim_buf_set_option(buf, 'bufhidden', 'wipe')
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
   end)
-
   -- Layout: line 0 = "  Project" (header, ignored on save)
   --         line 1 = title
   --         line 2 = due date
