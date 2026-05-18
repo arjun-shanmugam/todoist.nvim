@@ -1,4 +1,4 @@
-# ✅ todoist.nvim
+# todoist.nvim
 
 A Neovim plugin for managing [Todoist](https://todoist.com) tasks without leaving your editor.
 Tasks are displayed in a floating window grouped by project, with priority coloring, task hierarchy,
@@ -6,21 +6,24 @@ inline descriptions, and full CRUD operations. No external dependencies beyond `
 
 ---
 
-## ✨ Features
+## Features
 
-- **Project-grouped task view** — tasks organized under project headers, colored by priority
+- **Project-grouped task view** — tasks organized under project headers, ordered to match the Todoist app
 - **Task hierarchy** — subtasks indented beneath their parents
+- **Priority coloring** — tasks colored by Todoist priority (urgent → high → medium → normal)
 - **Inline descriptions** — toggle task descriptions in-place with `<CR>`
-- **Create & edit tasks** — floating editor with project, parent task, due date, and description fields
-- **Complete / reopen tasks** — toggle completion status; view completed tasks alongside active ones
-- **Live search** — `/` to filter tasks; results persist after exiting search mode
-- **Async API calls** — non-blocking `curl` requests, no UI freezes
+- **Create & edit tasks** — floating editor with title, project, parent task, due date, and description fields
+- **Complete / reopen tasks** — toggle completion status with `<leader>tc`
+- **Completed task view** — toggle display of completed tasks with `<leader>ts`; completed subtasks appear under their parents
+- **Native Vim search** — `/` to search across all task content, project headers, and due dates
+- **Full pagination** — fetches all tasks across all pages (Todoist paginates at 50)
+- **Async API calls** — non-blocking `curl` requests; no UI freezes
 - **Secure token storage** — stored at `stdpath('data')/todoist/token` with `0600` permissions
-- **which-key integration** — `<leader>t` group registered automatically
+- **which-key integration** — `<leader>t` group registered automatically if which-key is installed
 
 ---
 
-## 📋 Requirements
+## Requirements
 
 - Neovim 0.9+
 - `curl` in `PATH`
@@ -28,7 +31,7 @@ inline descriptions, and full CRUD operations. No external dependencies beyond `
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### [lazy.nvim](https://github.com/folke/lazy.nvim)
 
@@ -60,34 +63,35 @@ use({
 
 ---
 
-## 🔑 Authentication
+## Authentication
 
-The plugin resolves your API token in this order:
+The plugin resolves your API token in this priority order:
 
-1. **`token` option** in `setup()` — recommended for inline config
-2. **`TODOIST_API_TOKEN` environment variable** — good for shell-level secrets
-3. **Saved token file** — run `:TodoistLogin` to paste and save your token securely
+1. **`token` option** in `setup()` — simplest for inline config
+2. **`TODOIST_API_TOKEN` environment variable** — good for shell-level secrets management
+3. **Saved token file** — run `:TodoistLogin` to paste and save your token securely to disk
 
 To remove a saved token: `:TodoistLogout`
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Pass options to `require("todoist").setup({})`. All keys are optional.
 
 ```lua
 require("todoist").setup({
-  -- Your Todoist API token (get from https://app.todoist.com/app/settings/integrations/developer)
+  -- Your Todoist API token
+  -- Get from: https://app.todoist.com/app/settings/integrations/developer
   token = nil,
 
-  -- Which UI to use for the task view: "custom" (recommended) or "fzf"
+  -- Which UI to use: "custom" (recommended floating window) or "fzf"
   today_view_ui = "custom",
 
-  -- Default project ID to show on open (nil = all projects)
+  -- Default project ID to filter on open (nil = show all projects)
   default_project = nil,
 
-  -- Override global keymaps (see Keymaps section)
+  -- Global keymaps registered on setup() (see Keymaps section)
   keymaps = {
     enable = true,
     mappings = {
@@ -97,21 +101,24 @@ require("todoist").setup({
     },
   },
 
-  -- curl binary path override
+  -- curl binary to use for API requests
   curl_bin = "curl",
 
-  -- Custom notification handler (defaults to vim.notify)
+  -- Override the notification handler (defaults to vim.notify)
   notify = vim.notify,
 })
 ```
 
 ---
 
-## 🗂️ Task View
+## Task View
 
-Open the task view with `<leader>to` (or `:TodoistTasks`).
+Toggle the task view with `<leader>to` (or `:TodoistTasks`). Pressing `<leader>to` again closes it.
 
-Tasks are displayed in a floating window grouped by project. Within each project, completed tasks appear first (strikethrough), followed by active tasks indented to reflect their parent–child hierarchy. Priority is indicated by line color.
+Tasks are displayed in a floating window grouped by project, ordered to match the Todoist app's
+`child_order` field. Within each project, active tasks are shown first, indented to reflect their
+parent–child hierarchy. Completed tasks appear at the bottom of each project section when
+`<leader>ts` is toggled on.
 
 ### Navigation
 
@@ -131,107 +138,105 @@ Tasks are displayed in a floating window grouped by project. Within each project
 | `<leader>te` | Open edit window for the task under cursor |
 | `<leader>tc` | Toggle task completion (complete ↔ reopen) |
 | `<leader>tn` | Open create window for a new task |
-| `<leader>td` | Delete task under cursor |
+| `<leader>td` | Delete task under cursor (with confirmation) |
 | `<leader>tr` | Refresh task list from API |
 | `<leader>ts` | Toggle display of completed tasks |
-| `/` | Search (native Vim search — type pattern, `n`/`N` to jump between matches) |
 | `<leader>wx` | Close the task view |
 
 ### Search
 
-Press `/` to use Vim's native search. Task content, descriptions, project headers, and due dates are all searchable since they are real buffer lines.
+Press `/` to use Vim's native search. Task content, descriptions, project headers, and due dates
+are all searchable since they are real buffer lines.
 
-- **`/pattern<CR>`** — search and jump to first match
-- **`n` / `N`** — jump to next / previous match
-- **`:noh`** — clear search highlights
+| Key | Action |
+|-----|--------|
+| `/pattern<CR>` | Search and jump to first match |
+| `n` / `N` | Jump to next / previous match |
+| `:noh` | Clear search highlights |
 
 All task action keymaps work normally during and after search.
 
 ### Visual Mode & Yanking
 
-Standard visual mode (`v`, `V`, `<C-v>`) and yanking (`y`) work normally in the task view — select and copy any text.
+Standard visual mode (`v`, `V`, `<C-v>`) and yanking (`y`) work normally in the task view.
 
 ---
 
-## ✏️ Create Task Window
+## Create Task Window
 
 Open with `<leader>tn` from the task view.
 
-The window is a floating editor with labeled sections:
-
 ```
-╭─ Create Task ──────────────────────────────────────╮
-│  Project                                           │
-│  Work                                              │
-│  ────────────────────────────────────────────────  │
-│  Parent Task                                       │
-│  None                                              │
-│  ────────────────────────────────────────────────  │
-│  Title                                             │
-│  [cursor here — type your task title]              │
-│  ────────────────────────────────────────────────  │
-│  Due Date                                          │
-│  tomorrow                                          │
-│  ────────────────────────────────────────────────  │
-│  Description                                       │
-│  Any extra notes here                              │
-╰─ <leader>tw save · <leader>tp project · <leader>ta parent · <leader>tq close ─╯
+╭─ New Task ──────────────────────────────────────────╮
+│  [type task title here]                             │
+│  [due date — e.g. "tomorrow", "next monday"]        │
+│  [description — optional, supports multiple lines]  │
+╰─ :w save  ·  <leader>tp project  ·  <leader>ta parent  ·  :q close ─╯
 ```
 
 | Key | Action |
 |-----|--------|
-| `<leader>tw` | Save and create the task |
+| `:w` | Save and create the task |
 | `<leader>tp` | Open project picker |
-| `<leader>ta` | Open parent task picker (filters to tasks in the selected project) |
-| `<leader>tq` | Discard and close |
+| `<leader>ta` | Open parent task picker (filtered to the selected project) |
+| `:q` | Discard and close |
 
-**Due date** accepts any natural language string that Todoist understands (e.g. `today`, `tomorrow`, `next monday`, `Jan 15`). Leave blank to create a task with no due date.
-
----
-
-## 📝 Edit Task Window
-
-Open with `<leader>te` while the cursor is on a task.
-
-The layout is identical to the create window, pre-populated with the task's current values.
-
-| Key | Action |
-|-----|--------|
-| `<leader>tw` | Save changes |
-| `<leader>tp` | Change project (uses Todoist move endpoint) |
-| `<leader>ta` | Change parent task (or set to "None" for top-level) |
-| `<leader>tq` | Discard and close |
-
-**Clearing the due date**: erase the due date line and save — the plugin sends Todoist's magic string `"no date"` to remove it.
-
-**Changing the project** automatically clears the selected parent (since the parent must belong to the same project).
+**Due date** accepts any natural-language string Todoist understands: `today`, `tomorrow`,
+`next monday`, `Jan 15`, `every day`, etc. Leave the field blank to create a task with no due date.
 
 ---
 
-## 🌐 Global Keymaps
+## Edit Task Window
 
-Set automatically during `setup()`. Registered under `<leader>t` in which-key.
+Open with `<leader>te` while the cursor is on a task. The window is pre-populated with the task's
+current title, due date, and description.
 
 | Key | Action |
 |-----|--------|
-| `<leader>to` | Open task view |
+| `:w` | Save changes |
+| `<leader>tp` | Change project (uses the Todoist move endpoint) |
+| `<leader>ta` | Change parent task, or pick "None" for top-level |
+| `:q` | Discard and close |
+
+**Clearing the due date**: erase the due date line and save — the plugin sends Todoist's `"no date"`
+magic string to remove it.
+
+**Changing the project** automatically clears the selected parent task, since the parent must belong
+to the same project.
+
+**Editing a completed task**: if the task was completed and its parent is not locally cached,
+the plugin fetches the parent from the API to show it correctly in the editor.
+
+---
+
+## Global Keymaps
+
+Set automatically during `setup()`. Registered under `<leader>t` in which-key (if installed).
+
+| Key | Action |
+|-----|--------|
+| `<leader>to` | Toggle task view (open if closed, close if open) |
 | `<leader>tl` | Login (`:TodoistLogin`) |
 | `<leader>tL` | Logout (`:TodoistLogout`) |
 
 ### Disabling / Customizing
 
+Disable all automatic keymaps:
+
 ```lua
 require("todoist").setup({
-  keymaps = { enable = false }, -- disable all automatic keymaps
+  keymaps = { enable = false },
 })
 ```
+
+Disable or remap individual keys:
 
 ```lua
 require("todoist").setup({
   keymaps = {
     mappings = {
-      open_tasks = "<leader>to", -- customize
-      login      = false,        -- disable this specific keymap
+      open_tasks = "<leader>to",
+      login      = false,  -- disable this keymap
       logout     = false,
     },
   },
@@ -240,31 +245,43 @@ require("todoist").setup({
 
 ---
 
-## 📡 Commands
+## Commands
 
 | Command | Description |
 |---------|-------------|
-| `:TodoistTasks [project_id]` | Open the task view (optional project filter) |
-| `:TodoistLogin` | Prompt for API token and save to disk |
+| `:TodoistTasks [project_id]` | Open the task view (optional project ID filter) |
+| `:TodoistLogin` | Prompt for API token and save it securely to disk |
 | `:TodoistLogout` | Delete the saved token file |
-| `:TodoistComplete <task_id>` | Complete a task by ID |
+| `:TodoistComplete <task_id>` | Complete a task by its ID |
 
 ---
 
-## 🔒 Security
+## API
 
-- `:TodoistLogin` uses `vim.ui.input` with `secret = true` — the token is never echoed
-- Token file is written with `0600` permissions under `stdpath('data')/todoist/`
-- Setting `TODOIST_API_TOKEN` in the environment avoids writing any file
+The plugin targets the [Todoist REST API v1](https://developer.todoist.com/rest/v1/) and uses
+cursor-based pagination to fetch all tasks regardless of how many you have.
+
+All requests are made asynchronously via `vim.fn.jobstart` + `curl`. The UI stays responsive
+during loads; a spinner appears in the task buffer while a refresh is in progress.
 
 ---
 
-## 🙏 Credits
+## Security
+
+- `:TodoistLogin` uses `vim.ui.input` with `secret = true` — the token is never echoed to the screen
+- The token file is written with `0600` permissions under `stdpath('data')/todoist/`
+- Setting `TODOIST_API_TOKEN` in the environment avoids writing any file at all
+- The inline `token = "..."` config option is convenient but stores the secret in your config file;
+  use the env var or `:TodoistLogin` to avoid committing it
+
+---
+
+## Credits
 
 Originally forked from [mshiyaf/todoist.nvim](https://github.com/mshiyaf/todoist.nvim).
 
 ---
 
-## 📄 License
+## License
 
 MIT
