@@ -203,21 +203,21 @@ Open with `<leader>te` while the cursor is on a task. The window is pre-populate
 current title, due date, and description.
 
 ```
-╭─────────────────────── Edit Task ──────────────────────╮
-│  Project                                               │
-│  Work                                                  │
-│  ─────────────────────────────────────────────────     │
-│  Parent Task                                           │
-│  Q3 planning                                           │
-│  ─────────────────────────────────────────────────     │
-│  Title                                                 │
-│  Write weekly update                                   │
-│  ─────────────────────────────────────────────────     │
-│  Due Date                                              │
-│  friday                                                │
-│  ─────────────────────────────────────────────────     │
-│  Description                                           │
-│  Include metrics from last sprint                      │
+╭─────────────────────── Edit Task ───────────────────────────────╮
+│  Project                                                        │
+│  Work                                                           │
+│  ────────────────────────────────────────────────────────────── │
+│  Parent Task                                                    │
+│  Q3 planning                                                    │
+│  ────────────────────────────────────────────────────────────── │
+│  Title                                                          │
+│  Write weekly update                                            │
+│  ────────────────────────────────────────────────────────────── │
+│  Due Date                                                       │
+│  friday                                                         │
+│  ────────────────────────────────────────────────────────────── │
+│  Description                                                    │
+│  Include metrics from last sprint                               │
 ╰── :w save · <leader>tp project · <leader>ta parent · :q close ──╯
 ```
 
