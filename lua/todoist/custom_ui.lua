@@ -689,7 +689,7 @@ local function open_create_window(state_obj)
         vim.api.nvim_set_current_win(state_obj.win)
       end
     end)
-    local token = auth.load_token()
+    local token = require("todoist.auth").load_token()
     if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
 
     local payload = { content = new_content }
