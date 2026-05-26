@@ -1183,23 +1183,22 @@ function setup_actions(state_obj)
     local token  = auth.load_token()
     if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
 
-    client.reorder_tasks(token, {
-      { id = tostring(task.id),  child_order = other_order },
-      { id = tostring(other.id), child_order = task_order  },
-    }, function(err)
-      if err then
-        -- Revert local state
-        for _, t in ipairs(state_obj.tasks) do
-          if tostring(t.id) == tostring(task.id) then
-            t.child_order = task_order
-          elseif tostring(t.id) == tostring(other.id) then
-            t.child_order = other_order
-          end
+    local function revert()
+      for _, t in ipairs(state_obj.tasks) do
+        if tostring(t.id) == tostring(task.id) then
+          t.child_order = task_order
+        elseif tostring(t.id) == tostring(other.id) then
+          t.child_order = other_order
         end
-        vim.notify("Failed to reorder: " .. err, vim.log.levels.ERROR)
-        return
       end
-      refresh_with_loader(state_obj)
+    end
+
+    client.update_task(token, task.id, { child_order = other_order }, function(err)
+      if err then revert(); vim.notify("Failed to reorder: " .. err, vim.log.levels.ERROR); return end
+      client.update_task(token, other.id, { child_order = task_order }, function(err2)
+        if err2 then revert(); vim.notify("Failed to reorder: " .. err2, vim.log.levels.ERROR); return end
+        refresh_with_loader(state_obj)
+      end)
     end)
   end
 
