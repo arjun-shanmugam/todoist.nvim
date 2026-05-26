@@ -1121,6 +1121,88 @@ function setup_actions(state_obj)
   local buf = state_obj.buf
   local o   = { buffer = buf, noremap = true, silent = true }
 
+  local function move_task_order(direction)
+    local cursor   = vim.api.nvim_win_get_cursor(state_obj.win)
+    local line_info = state_obj.line_map[cursor[1]]
+    if not line_info or line_info.type ~= "task" then
+      vim.notify("No task selected", vim.log.levels.WARN)
+      return
+    end
+    local task = line_info.task
+    if task.checked then
+      vim.notify("Cannot reorder completed tasks", vim.log.levels.WARN)
+      return
+    end
+
+    -- Normalize parent_id: vim.NIL and nil both mean "root task"
+    local function norm_parent(v)
+      if v == nil or v == vim.NIL then return "" end
+      return tostring(v)
+    end
+
+    -- Siblings: active tasks with same parent and same project
+    local siblings = {}
+    for _, t in ipairs(state_obj.tasks) do
+      if not t.checked
+        and tostring(t.project_id) == tostring(task.project_id)
+        and norm_parent(t.parent_id) == norm_parent(task.parent_id) then
+        table.insert(siblings, t)
+      end
+    end
+    table.sort(siblings, function(a, b)
+      return (a.child_order or 0) < (b.child_order or 0)
+    end)
+
+    local idx = nil
+    for i, t in ipairs(siblings) do
+      if tostring(t.id) == tostring(task.id) then idx = i; break end
+    end
+    if not idx then return end
+
+    local swap_idx = idx + direction
+    if swap_idx < 1 or swap_idx > #siblings then
+      vim.notify(direction < 0 and "Already at top" or "Already at bottom", vim.log.levels.WARN)
+      return
+    end
+
+    local other       = siblings[swap_idx]
+    local task_order  = task.child_order or 0
+    local other_order = other.child_order or 0
+
+    -- Update local state
+    for _, t in ipairs(state_obj.tasks) do
+      if tostring(t.id) == tostring(task.id) then
+        t.child_order = other_order
+      elseif tostring(t.id) == tostring(other.id) then
+        t.child_order = task_order
+      end
+    end
+
+    local auth   = require("todoist.auth")
+    local client = require("todoist.client")
+    local token  = auth.load_token()
+    if not token then vim.notify("No token found", vim.log.levels.ERROR); return end
+
+    client.reorder_tasks(token, {
+      { id = tostring(task.id),  child_order = other_order },
+      { id = tostring(other.id), child_order = task_order  },
+    }, function(err)
+      if err then
+        -- Revert local state
+        for _, t in ipairs(state_obj.tasks) do
+          if tostring(t.id) == tostring(task.id) then
+            t.child_order = task_order
+          elseif tostring(t.id) == tostring(other.id) then
+            t.child_order = other_order
+          end
+        end
+        vim.notify("Failed to reorder: " .. err, vim.log.levels.ERROR)
+        return
+      end
+      refresh_with_loader(state_obj)
+    end)
+  end
+
   vim.keymap.set('n', '<CR>', function()
     local cursor    = vim.api.nvim_win_get_cursor(state_obj.win)
     local line_info = state_obj.line_map[cursor[1]]
@@ -1175,6 +1257,8 @@ function setup_actions(state_obj)
       vim.notify(msg)
     end
   end, vim.tbl_extend("force", o, { desc = "Todoist: toggle completed tasks" }))
+  vim.keymap.set('n', '<leader>tmu', function() move_task_order(-1) end, vim.tbl_extend("force", o, { desc = "Todoist: move task up"   }))
+  vim.keymap.set('n', '<leader>tmd', function() move_task_order( 1) end, vim.tbl_extend("force", o, { desc = "Todoist: move task down" }))
 end
 
 -- Main entry point

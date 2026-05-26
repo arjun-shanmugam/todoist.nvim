@@ -188,6 +188,15 @@ function M.move_task(token, task_id, body, cb)
   }, cb)
 end
 
+function M.reorder_tasks(token, items, cb)
+  request({
+    method = "POST",
+    path   = "/tasks/reorder",
+    token  = token,
+    body   = { items = items },
+  }, cb)
+end
+
 function M.delete_task(token, task_id, cb)
   request({
     method = "DELETE",

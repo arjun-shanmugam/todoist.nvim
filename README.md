@@ -141,6 +141,8 @@ parent–child hierarchy. Completed tasks appear at the bottom of each project s
 | `<leader>td` | Delete task under cursor (with confirmation) |
 | `<leader>tr` | Refresh task list from API |
 | `<leader>ts` | Toggle display of completed tasks |
+| `<leader>tmu` | Move task up within its siblings (respects parent boundary) |
+| `<leader>tmd` | Move task down within its siblings (respects parent boundary) |
 | `<leader>wx` | Close the task view |
 
 ### Search
